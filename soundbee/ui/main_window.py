@@ -345,6 +345,15 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_nas_clicked(self, src: NASSource):
         if src.mount_path and os.path.isdir(src.mount_path):
             self._scan_in_background(src.mount_path, source_id=src.id)
+        else:
+            self.lbl_stats.set_text(f"Conectando ao NAS '{src.name}'...")
+            def bg_mount():
+                ok, mpath, msg = NASManager.mount_share(src)
+                if ok and mpath and os.path.isdir(mpath):
+                    self._scan_in_background(mpath, source_id=src.id)
+                else:
+                    GLib.idle_add(lambda: self.lbl_stats.set_text(f"Falha ao conectar ao NAS: {msg}"))
+            threading.Thread(target=bg_mount, daemon=True).start()
 
     def _on_scan_folder_clicked(self, *args):
         dlg = Gtk.FileDialog()

@@ -50,6 +50,7 @@ class NASSource:
     mount_path: str = ""  # resolved local path (e.g. /run/user/1000/gvfs/... or /mnt/nas/...)
     username: Optional[str] = None
     password: Optional[str] = None
+    domain: Optional[str] = "WORKGROUP"
     auto_connect: bool = True
     last_scanned: Optional[float] = None
     total_tracks: int = 0
