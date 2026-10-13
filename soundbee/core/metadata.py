@@ -63,7 +63,51 @@ class MetadataReader:
             base = os.path.splitext(os.path.basename(file_path))[0]
             track.title = base
 
+        cls.infer_tags_from_path(track)
         return track
+
+    @classmethod
+    def infer_tags_from_path(cls, track: Track):
+        """Infers artist, album, year, track number from directory/file structure if missing."""
+        import urllib.parse
+        import re
+
+        path = urllib.parse.unquote(track.file_path)
+        parts = [p for p in path.replace("\\", "/").rstrip("/").split("/") if p]
+        if not parts:
+            return
+
+        filename = parts[-1]
+        album_folder = parts[-2] if len(parts) >= 2 else ""
+        artist_folder = parts[-3] if len(parts) >= 3 else ""
+
+        # 1. Infer Track number and Title from filename
+        name_no_ext = os.path.splitext(filename)[0]
+        if not track.track_number or not track.title or track.title == name_no_ext:
+            m = re.match(r"^(\d{1,3})\s*[-_.\s]\s*(.+)$", name_no_ext)
+            if m:
+                if not track.track_number:
+                    try:
+                        track.track_number = int(m.group(1))
+                    except ValueError:
+                        pass
+                if not track.title or track.title == name_no_ext:
+                    track.title = m.group(2).strip()
+
+        # 2. Infer Year and Album from album folder
+        if not track.album and album_folder:
+            m = re.match(r"^[\(\[]?(\d{4})[\)\]]?\s*[-_.\s]\s*(.+)$", album_folder)
+            if m:
+                if not track.year:
+                    track.year = int(m.group(1))
+                track.album = m.group(2).strip()
+            else:
+                track.album = album_folder
+
+        # 3. Infer Artist from artist folder
+        if not track.artist and artist_folder:
+            if artist_folder.lower() not in ("musica", "music", "songs", "audio", "nas-4tb", "nas", "share"):
+                track.artist = artist_folder
 
     @classmethod
     def read_track_from_gio(cls, uri_or_gfile: Any, source_id: str = "nas") -> Optional[Track]:
@@ -113,6 +157,7 @@ class MetadataReader:
             else:
                 track.title = os.path.splitext(info.get_name())[0]
 
+            cls.infer_tags_from_path(track)
             return track
         except Exception:
             return None
