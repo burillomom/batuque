@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soundbee"
+version = "0.1.0"
+description = "Gerenciador de música e sincronizador de dispositivos open-source para Linux inspirado no MusicBee"
+readme = "README.md"
+authors = [
+    { name = "Murillo Bom" }
+]
+license = { text = "GPL-3.0-or-later" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Multimedia :: Sound/Audio"
+]
+dependencies = [
+    "mutagen>=1.47.0",
+    "pillow>=10.0.0",
+    "PyGObject>=3.44.0"
+]
+
+[project.scripts]
+soundbee = "soundbee.cli:main"
+soundbee-gui = "soundbee.ui.app:run_app"
