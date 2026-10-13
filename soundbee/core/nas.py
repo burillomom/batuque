@@ -103,12 +103,26 @@ class NASManager:
             host, share, subfolder, base_share_uri = cls.parse_smb_uri(target)
             mount_uri = base_share_uri
 
-        # Check if already mounted in GVFS
+        # Check if already mounted in GVFS (POSIX path)
         resolved_share_path = cls._find_gvfs_mount_for_uri(mount_uri)
         if resolved_share_path and os.path.isdir(resolved_share_path):
             full_local_path = os.path.join(resolved_share_path, subfolder) if subfolder else resolved_share_path
             source.mount_path = full_local_path
             return True, full_local_path, "Compartilhamento já montado no GVFS."
+
+        # Check if already mounted in GIO/GVFS daemon
+        if GIO_AVAILABLE:
+            try:
+                vm = Gio.VolumeMonitor.get()
+                for mount in vm.get_mounts():
+                    root = mount.get_root()
+                    m_uri = (root.get_uri() or "").rstrip("/").lower()
+                    if m_uri and (m_uri == mount_uri.lower() or m_uri.startswith(mount_uri.lower()) or mount_uri.lower().startswith(m_uri)):
+                        full_uri = f"{mount_uri}/{subfolder}".rstrip("/") if subfolder else mount_uri
+                        source.mount_path = full_uri
+                        return True, full_uri, "Compartilhamento já ativo no GIO."
+            except Exception:
+                pass
 
         # Perform native GIO mount with Gio.MountOperation
         loop = GLib.MainLoop()
@@ -181,7 +195,9 @@ class NASManager:
                 full_local_path = os.path.join(resolved_share_path, subfolder) if subfolder else resolved_share_path
                 source.mount_path = full_local_path
                 return True, full_local_path, "Montado com sucesso via GVFS."
-            return True, mount_uri, "Compartilhamento montado com sucesso."
+            full_uri = f"{mount_uri}/{subfolder}".rstrip("/") if subfolder else mount_uri
+            source.mount_path = full_uri
+            return True, full_uri, "Compartilhamento montado com sucesso no GIO."
 
         return False, "", mount_result["error"] or "Falha ao conectar ao compartilhamento."
 

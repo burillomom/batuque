@@ -69,9 +69,10 @@ class AudioTranscoder:
         codec_info = cls.CODEC_MAP.get(profile.target_codec.lower(), ("libmp3lame", "mp3"))
         ffmpeg_codec = codec_info[0]
 
+        is_uri = source_path.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://"))
         cmd = [
             "ffmpeg", "-y", "-loglevel", "error",
-            "-i", source_path,
+            "-i", "pipe:0" if is_uri else source_path,
             "-vn",  # Exclude video streams
             "-c:a", ffmpeg_codec,
             "-b:a", f"{profile.target_bitrate}k"
@@ -88,8 +89,17 @@ class AudioTranscoder:
         cmd.append(temp_dest)
 
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            if res.returncode == 0 and os.path.isfile(temp_dest) and os.path.getsize(temp_dest) > 0:
+            if is_uri:
+                cat_proc = subprocess.Popen(["gio", "cat", source_path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                ff_proc = subprocess.Popen(cmd, stdin=cat_proc.stdout, stderr=subprocess.PIPE)
+                cat_proc.stdout.close()
+                _, ff_err = ff_proc.communicate(timeout=120)
+                success = (ff_proc.returncode == 0)
+            else:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                success = (res.returncode == 0)
+
+            if success and os.path.isfile(temp_dest) and os.path.getsize(temp_dest) > 0:
                 os.replace(temp_dest, dest_path)
                 return True
             else:

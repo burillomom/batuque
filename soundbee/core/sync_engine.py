@@ -177,7 +177,11 @@ class SyncEngine:
             dest_dir = os.path.dirname(item.target_full_path)
             os.makedirs(dest_dir, exist_ok=True)
             try:
-                shutil.copy2(item.source_path, item.target_full_path)
+                if item.source_path.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://")):
+                    import subprocess
+                    subprocess.run(["gio", "copy", item.source_path, item.target_full_path], check=True)
+                else:
+                    shutil.copy2(item.source_path, item.target_full_path)
                 # Process artwork
                 ArtworkProcessor.process_and_save_artwork(
                     item.source_path, item.target_full_path, plan.device_profile

@@ -331,25 +331,32 @@ class MainWindow(Adw.ApplicationWindow):
         q = entry.get_text()
         self._refresh_library(search_query=q)
 
+    @staticmethod
+    def _is_accessible_path(p: Optional[str]) -> bool:
+        if not p:
+            return False
+        return os.path.isdir(p) or p.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://"))
+
     def _on_add_nas_clicked(self, *args):
         def on_saved(src: NASSource):
             self.db.upsert_nas_source(src)
             self._refresh_nas_sources()
-            # Start background scan of NAS
-            if src.mount_path and os.path.isdir(src.mount_path):
-                self._scan_in_background(src.mount_path, source_id=src.id)
+            target_path = src.mount_path or src.uri
+            if self._is_accessible_path(target_path):
+                self._scan_in_background(target_path, source_id=src.id)
 
         dlg = NASConfigDialog(on_saved_callback=on_saved, transient_for=self)
         dlg.present()
 
     def _on_nas_clicked(self, src: NASSource):
-        if src.mount_path and os.path.isdir(src.mount_path):
-            self._scan_in_background(src.mount_path, source_id=src.id)
+        target_path = src.mount_path or src.uri
+        if self._is_accessible_path(target_path):
+            self._scan_in_background(target_path, source_id=src.id)
         else:
             self.lbl_stats.set_text(f"Conectando ao NAS '{src.name}'...")
             def bg_mount():
                 ok, mpath, msg = NASManager.mount_share(src)
-                if ok and mpath and os.path.isdir(mpath):
+                if ok and self._is_accessible_path(mpath):
                     self._scan_in_background(mpath, source_id=src.id)
                 else:
                     GLib.idle_add(lambda: self.lbl_stats.set_text(f"Falha ao conectar ao NAS: {msg}"))
@@ -394,11 +401,14 @@ class MainWindow(Adw.ApplicationWindow):
             pass
 
     def _scan_in_background(self, path: str, source_id: str):
-        self.lbl_stats.set_text(f"Escanenado '{path}'...")
+        self.lbl_stats.set_text(f"Indexando '{path}'...")
         scanner = LibraryScanner(self.db)
 
         def thread_target():
-            scanner.scan_directory(path, source_id=source_id)
+            def on_prog(curr, tot, name):
+                GLib.idle_add(lambda: self.lbl_stats.set_text(f"Indexando [{curr}/{tot}]: {name}"))
+
+            count = scanner.scan_directory(path, source_id=source_id, on_progress=on_prog)
             GLib.idle_add(lambda: self._refresh_library())
 
         threading.Thread(target=thread_target, daemon=True).start()

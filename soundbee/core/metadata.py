@@ -66,6 +66,58 @@ class MetadataReader:
         return track
 
     @classmethod
+    def read_track_from_gio(cls, uri_or_gfile: Any, source_id: str = "nas") -> Optional[Track]:
+        """Reads audio track metadata from a GIO file or URI (e.g. smb://)."""
+        import io
+        try:
+            import gi
+            gi.require_version('Gio', '2.0')
+            from gi.repository import Gio
+        except Exception:
+            return None
+
+        gfile = uri_or_gfile if hasattr(uri_or_gfile, "query_info") else Gio.File.new_for_uri(str(uri_or_gfile))
+        uri = gfile.get_uri()
+        ext = os.path.splitext(gfile.get_basename())[1].lower()
+        if ext not in cls.SUPPORTED_EXTENSIONS:
+            return None
+
+        try:
+            info = gfile.query_info("standard::name,standard::size,time::modified", Gio.FileQueryInfoFlags.NONE, None)
+            size = info.get_size()
+            dt = info.get_modification_date_time()
+            mtime = dt.to_unix() if dt else 0.0
+
+            track = Track(
+                file_path=uri,
+                file_format=ext.lstrip("."),
+                size_bytes=size,
+                mtime=float(mtime),
+                source_id=source_id
+            )
+
+            # Read stream
+            stream = gfile.read(None)
+            data = stream.read_bytes(1024 * 512, None).get_data()
+            stream.close()
+
+            audio = mutagen.File(io.BytesIO(data), filename=info.get_name())
+            if audio:
+                if hasattr(audio, "info") and audio.info is not None:
+                    track.duration_seconds = getattr(audio.info, "length", 0.0)
+                    bitrate = getattr(audio.info, "bitrate", 0)
+                    track.bitrate_kbps = int(bitrate / 1000) if bitrate else 0
+                    track.sample_rate = getattr(audio.info, "sample_rate", 44100)
+                cls._extract_tags(audio, ext, track)
+                track.has_artwork = cls._has_artwork(audio, ext, uri)
+            else:
+                track.title = os.path.splitext(info.get_name())[0]
+
+            return track
+        except Exception:
+            return None
+
+    @classmethod
     def _extract_tags(cls, audio: Any, ext: str, track: Track):
         tags = audio.tags
         if not tags:
