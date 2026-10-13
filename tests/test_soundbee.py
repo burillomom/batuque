@@ -203,6 +203,14 @@ class TestSoundBee(unittest.TestCase):
         # Relative path from Playlists/ to Music/ is ../Music/...
         self.assertIn("../Music/Artist/Album/01 - Song 1.mp3", content)
 
+    def test_parse_smb_uri(self):
+        from soundbee.core.nas import NASManager
+        host, share, subfolder, base = NASManager.parse_smb_uri("smb://100.79.195.46/NAS-4TB/Musica")
+        self.assertEqual(host, "100.79.195.46")
+        self.assertEqual(share, "NAS-4TB")
+        self.assertEqual(subfolder, "Musica")
+        self.assertEqual(base, "smb://100.79.195.46/NAS-4TB")
+
 
 if __name__ == "__main__":
     unittest.main()
