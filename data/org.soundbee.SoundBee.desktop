@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=SoundBee
+GenericName=Gerenciador de Música e Sincronizador
+Comment=Gerencie sua biblioteca musical no NAS e sincronize dispositivos portáteis (DAPs, USB, MTP)
+Exec=soundbee %U
+Terminal=false
+Type=Application
+Icon=org.soundbee.SoundBee
+Categories=AudioVideo;Audio;Music;Player;GTK;
+Keywords=MusicBee;NAS;SMB;MP3;FLAC;DAP;Sync;Música;
+StartupNotify=true
+StartupWMClass=org.soundbee.SoundBee

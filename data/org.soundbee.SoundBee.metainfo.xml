@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.soundbee.SoundBee</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>SoundBee</name>
+  <summary>Gerenciador de música e sincronizador de dispositivos inspirado no MusicBee</summary>
+  <description>
+    <p>
+      SoundBee é um gerenciador de coleções musicais open-source para Linux focado em integração nativa com servidores NAS (SMB/NFS/WebDAV) e sincronização inteligente para dispositivos portáteis (DAPs, USB, cartões SD, MTP e pastas virtuais).
+    </p>
+    <ul>
+      <li>Visualização organizada por Álbuns, Artistas, Anos, Gêneros e Faixas</li>
+      <li>Conexão direta via GIO/GVFS com servidores NAS na rede</li>
+      <li>Perfis independentes de sincronização e conversão (FFmpeg) para cada dispositivo</li>
+      <li>Templates de organização de pastas compatíveis com MusicBee</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">org.soundbee.SoundBee.desktop</launchable>
+  <developer id="org.soundbee">
+    <name>Murillo Bom</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-10-18"/>
+  </releases>
+</component>

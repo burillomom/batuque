@@ -23,5 +23,6 @@ dependencies = [
 ]
 
 [project.scripts]
-soundbee = "soundbee.cli:main"
+soundbee = "soundbee.__main__:run_entrypoint"
 soundbee-gui = "soundbee.ui.app:run_app"
+soundbee-cli = "soundbee.cli:main"

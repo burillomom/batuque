@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="12" y1="12" x2="116" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1E2E"/>
+      <stop offset="100%" stop-color="#11111B"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="30" y1="30" x2="98" y2="98" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F9E2AF"/>
+      <stop offset="50%" stop-color="#FAB387"/>
+      <stop offset="100%" stop-color="#F38BA8"/>
+    </linearGradient>
+    <linearGradient id="beeBody" x1="44" y1="44" x2="84" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFD166"/>
+      <stop offset="100%" stop-color="#F4A261"/>
+    </linearGradient>
+    <linearGradient id="wingGrad" x1="28" y1="38" x2="100" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#89DCEB" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#CBA6F7" stop-opacity="0.65"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Squircle Base -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bgGrad)" stroke="#313244" stroke-width="2"/>
+
+  <!-- Subtle Glow Ring -->
+  <circle cx="64" cy="66" r="42" stroke="url(#goldGrad)" stroke-width="1.5" stroke-opacity="0.25" stroke-dasharray="4 4"/>
+
+  <!-- Headphone Arc -->
+  <path d="M30 64C30 43.0132 45.2223 26 64 26C82.7777 26 98 43.0132 98 64" stroke="url(#goldGrad)" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Wings -->
+  <ellipse cx="42" cy="56" rx="18" ry="11" transform="rotate(-25 42 56)" fill="url(#wingGrad)"/>
+  <ellipse cx="86" cy="56" rx="18" ry="11" transform="rotate(25 86 56)" fill="url(#wingGrad)"/>
+
+  <!-- Bee Abdomen / Body -->
+  <rect x="46" y="46" width="36" height="46" rx="18" fill="url(#beeBody)"/>
+
+  <!-- Bee Stripes -->
+  <path d="M47 62H81" stroke="#181825" stroke-width="5" stroke-linecap="round"/>
+  <path d="M46 73H82" stroke="#181825" stroke-width="5" stroke-linecap="round"/>
+  <path d="M50 84H78" stroke="#181825" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Bee Stinger -->
+  <path d="M60 91L64 99L68 91H60Z" fill="#FFD166"/>
+
+  <!-- Headphone Ear Cups -->
+  <rect x="22" y="56" width="12" height="24" rx="6" fill="url(#goldGrad)"/>
+  <rect x="94" y="56" width="12" height="24" rx="6" fill="url(#goldGrad)"/>
+
+  <!-- Equalizer Bars on Top -->
+  <rect x="57" y="34" width="3" height="8" rx="1.5" fill="#FFD166"/>
+  <rect x="62.5" y="31" width="3" height="11" rx="1.5" fill="#FAB387"/>
+  <rect x="68" y="35" width="3" height="7" rx="1.5" fill="#FFD166"/>
+</svg>

@@ -21,6 +21,7 @@ def main():
         prog="soundbee",
         description="SoundBee - Music Manager & Device Synchronizer for Linux"
     )
+    parser.add_argument("-v", "--version", action="version", version="SoundBee 0.1.0")
     subparsers = parser.add_subparsers(dest="command")
 
     # Command: stats
