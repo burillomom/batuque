@@ -218,6 +218,23 @@ class MetadataReader:
                 pass
 
     @classmethod
+    def _is_image_file(cls, filename: str) -> bool:
+        ext = os.path.splitext(filename)[1].lower()
+        return ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+
+    @classmethod
+    def _is_cover_image_name(cls, filename: str) -> bool:
+        stem = os.path.splitext(filename)[0].lower()
+        if not cls._is_image_file(filename):
+            return False
+        return (
+            stem in ("cover", "folder", "front", "album", "artwork", "front_cover", "sleeve")
+            or "cover" in stem
+            or "front" in stem
+            or stem.startswith("00")
+        )
+
+    @classmethod
     def _has_artwork(cls, audio: Any, ext: str, file_path: str) -> bool:
         # Check embedded artwork
         if ext == ".mp3":
@@ -228,15 +245,20 @@ class MetadataReader:
         elif ext == ".flac":
             if hasattr(audio, "pictures") and len(audio.pictures) > 0:
                 return True
-        elif ext == ".m4a":
+        elif ext in (".m4a", ".aac"):
             if audio.tags and "covr" in audio.tags and audio.tags["covr"]:
                 return True
 
-        # Check adjacent artwork file (cover.jpg, folder.jpg)
-        dir_path = os.path.dirname(file_path)
-        for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg"]:
-            if os.path.isfile(os.path.join(dir_path, art_name)):
-                return True
+        # Check adjacent artwork file for local paths
+        if not file_path.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://")):
+            try:
+                dir_path = os.path.dirname(file_path)
+                if os.path.isdir(dir_path):
+                    for name in os.listdir(dir_path):
+                        if cls._is_cover_image_name(name):
+                            return True
+            except Exception:
+                pass
 
         return False
 
@@ -244,78 +266,168 @@ class MetadataReader:
     def extract_artwork_bytes(cls, file_path: str) -> Optional[bytes]:
         """Extract album artwork bytes from file tags or adjacent folder image (supports local and GIO URIs)."""
         if file_path.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://")):
-            try:
-                import io
-                import gi
-                gi.require_version('Gio', '2.0')
-                from gi.repository import Gio
-                gfile = Gio.File.new_for_uri(file_path)
+            return cls._extract_artwork_gio(file_path)
+        return cls._extract_artwork_local(file_path)
 
-                # 1. Check parent directory for cover file
-                parent = gfile.get_parent()
-                if parent:
-                    for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "Cover.jpg", "Folder.jpg"]:
-                        cand = parent.get_child(art_name)
-                        if cand.query_exists(None):
-                            try:
-                                s = cand.read(None)
-                                data = s.read_bytes(1024 * 1024 * 6, None).get_data()
-                                s.close()
-                                if data:
-                                    return bytes(data)
-                            except Exception:
-                                pass
+    @classmethod
+    def _extract_artwork_gio(cls, file_path: str) -> Optional[bytes]:
+        try:
+            import io
+            import gi
+            gi.require_version('Gio', '2.0')
+            from gi.repository import Gio
+            gfile = Gio.File.new_for_uri(file_path)
 
-                # 2. Extract embedded tags from stream
-                stream = gfile.read(None)
-                data = stream.read_bytes(1024 * 1024 * 2, None).get_data()
-                stream.close()
-                if data:
-                    audio = mutagen.File(io.BytesIO(data), filename=gfile.get_basename())
-                    if audio and audio.tags:
-                        ext = os.path.splitext(gfile.get_basename())[1].lower()
-                        if ext == ".mp3":
-                            for key, val in audio.tags.items():
+            # 1. Check parent directory (and grandparent for multi-disc folders) for cover image
+            candidate_dirs = []
+            parent = gfile.get_parent()
+            if parent:
+                candidate_dirs.append(parent)
+                pname = parent.get_basename().lower()
+                if any(pname.startswith(p) for p in ("cd", "disc", "disk", "side", "vol")):
+                    gp = parent.get_parent()
+                    if gp:
+                        candidate_dirs.append(gp)
+
+            for folder in candidate_dirs:
+                try:
+                    enumerator = folder.enumerate_children(
+                        "standard::name,standard::type",
+                        Gio.FileQueryInfoFlags.NONE,
+                        None
+                    )
+                    image_files = []
+                    priority_cover = None
+                    for info in enumerator:
+                        name = info.get_name()
+                        if info.get_file_type() == Gio.FileType.REGULAR and cls._is_image_file(name):
+                            if cls._is_cover_image_name(name):
+                                priority_cover = name
+                                break
+                            image_files.append(name)
+
+                    selected_name = priority_cover or (image_files[0] if len(image_files) == 1 else None)
+                    if selected_name:
+                        cand = folder.get_child(selected_name)
+                        s = cand.read(None)
+                        data = s.read_bytes(1024 * 1024 * 6, None).get_data()
+                        s.close()
+                        if data:
+                            return bytes(data)
+                except Exception:
+                    pass
+
+            # 2. Extract embedded tags from stream
+            stream = gfile.read(None)
+            data = stream.read_bytes(1024 * 1024 * 4, None).get_data()
+            stream.close()
+            if data:
+                ext = os.path.splitext(gfile.get_basename())[1].lower()
+                b_io = io.BytesIO(data)
+
+                if ext in (".mp3", ".aiff", ".aif"):
+                    try:
+                        id3 = ID3(b_io)
+                        for val in id3.values():
+                            if isinstance(val, APIC):
+                                return val.data
+                    except Exception:
+                        pass
+
+                if ext == ".flac":
+                    try:
+                        flac_obj = FLAC(b_io)
+                        if hasattr(flac_obj, "pictures") and flac_obj.pictures:
+                            return flac_obj.pictures[0].data
+                    except Exception:
+                        pass
+
+                try:
+                    audio = mutagen.File(b_io, filename=gfile.get_basename())
+                    if audio:
+                        if hasattr(audio, "pictures") and audio.pictures:
+                            return audio.pictures[0].data
+                        if audio.tags:
+                            if "covr" in audio.tags and audio.tags["covr"]:
+                                return bytes(audio.tags["covr"][0])
+                            for val in audio.tags.values():
                                 if isinstance(val, APIC):
                                     return val.data
-                        elif ext == ".flac" and hasattr(audio, "pictures"):
-                            if audio.pictures:
-                                return audio.pictures[0].data
-                        elif ext in (".m4a", ".aac") and "covr" in audio.tags:
-                            covr = audio.tags["covr"]
-                            if covr and len(covr) > 0:
-                                return bytes(covr[0])
-            except Exception:
-                pass
-            return None
+                except Exception:
+                    pass
 
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def _extract_artwork_local(cls, file_path: str) -> Optional[bytes]:
         ext = os.path.splitext(file_path)[1].lower()
+
+        # 1. Check parent folders for cover image
         try:
-            audio = mutagen.File(file_path)
-            if audio and audio.tags:
-                if ext == ".mp3":
-                    for key, val in audio.tags.items():
-                        if isinstance(val, APIC):
-                            return val.data
-                elif ext == ".flac" and hasattr(audio, "pictures"):
-                    if audio.pictures:
-                        return audio.pictures[0].data
-                elif ext == ".m4a" and "covr" in audio.tags:
-                    covr = audio.tags["covr"]
-                    if covr and len(covr) > 0:
-                        return bytes(covr[0])
+            parent_dir = os.path.dirname(file_path)
+            candidate_dirs = [parent_dir]
+            pname = os.path.basename(parent_dir).lower()
+            if any(pname.startswith(p) for p in ("cd", "disc", "disk", "side", "vol")):
+                candidate_dirs.append(os.path.dirname(parent_dir))
+
+            for d in candidate_dirs:
+                if not os.path.isdir(d):
+                    continue
+                entries = os.listdir(d)
+                priority_cover = None
+                img_entries = []
+                for name in entries:
+                    if cls._is_cover_image_name(name):
+                        priority_cover = name
+                        break
+                    elif cls._is_image_file(name):
+                        img_entries.append(name)
+
+                chosen = priority_cover or (img_entries[0] if len(img_entries) == 1 else None)
+                if chosen:
+                    img_path = os.path.join(d, chosen)
+                    try:
+                        with open(img_path, "rb") as f:
+                            data = f.read()
+                            if data:
+                                return data
+                    except OSError:
+                        pass
         except Exception:
             pass
 
-        # Check folder
-        dir_path = os.path.dirname(file_path)
-        for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "Cover.jpg", "Folder.jpg"]:
-            cand = os.path.join(dir_path, art_name)
-            if os.path.isfile(cand):
+        # 2. Check embedded audio tags
+        try:
+            if ext in (".mp3", ".aiff", ".aif"):
                 try:
-                    with open(cand, "rb") as f:
-                        return f.read()
-                except OSError:
+                    id3 = ID3(file_path)
+                    for val in id3.values():
+                        if isinstance(val, APIC):
+                            return val.data
+                except Exception:
                     pass
+
+            if ext == ".flac":
+                try:
+                    flac_obj = FLAC(file_path)
+                    if hasattr(flac_obj, "pictures") and flac_obj.pictures:
+                        return flac_obj.pictures[0].data
+                except Exception:
+                    pass
+
+            audio = mutagen.File(file_path)
+            if audio:
+                if hasattr(audio, "pictures") and audio.pictures:
+                    return audio.pictures[0].data
+                if audio.tags:
+                    if "covr" in audio.tags and audio.tags["covr"]:
+                        return bytes(audio.tags["covr"][0])
+                    for val in audio.tags.values():
+                        if isinstance(val, APIC):
+                            return val.data
+        except Exception:
+            pass
 
         return None

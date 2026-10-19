@@ -5,13 +5,15 @@ Album artwork processing, resizing, and embedding for SoundBee.
 import os
 import io
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageFile
 from mutagen.id3 import ID3, APIC, error as ID3Error
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
 
 from .metadata import MetadataReader
 from .models import DeviceProfile
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class ArtworkProcessor:
@@ -57,12 +59,11 @@ class ArtworkProcessor:
             image = Image.open(io.BytesIO(data))
             if image.width > max_dim or image.height > max_dim:
                 image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-                # Convert to RGB if needed (JPEG doesn't support RGBA)
-                if image.mode in ("RGBA", "P"):
-                    image = image.convert("RGB")
-                out_buf = io.BytesIO()
-                image.save(out_buf, format="JPEG", quality=85)
-                return out_buf.getvalue()
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            out_buf = io.BytesIO()
+            image.save(out_buf, format="JPEG", quality=85)
+            return out_buf.getvalue()
         except Exception:
             pass
         return data
@@ -109,10 +110,21 @@ class AlbumArtworkCache:
     without continuous network requests to NAS or repeated file tag decoding.
     """
     CACHE_DIR = os.path.expanduser("~/.cache/soundbee/covers")
+    _executor = None
+    _lock = None
+    _in_flight = None
 
     @classmethod
-    def _ensure_dir(cls):
+    def _ensure_init(cls):
         os.makedirs(cls.CACHE_DIR, exist_ok=True)
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        if cls._lock is None:
+            cls._lock = threading.Lock()
+        if cls._in_flight is None:
+            cls._in_flight = set()
+        if cls._executor is None:
+            cls._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="soundbee_art")
 
     @classmethod
     def get_cache_key(cls, artist: str, album: str) -> str:
@@ -122,7 +134,7 @@ class AlbumArtworkCache:
 
     @classmethod
     def get_cached_cover_path(cls, artist: str, album: str) -> Optional[str]:
-        cls._ensure_dir()
+        cls._ensure_init()
         key = cls.get_cache_key(artist, album)
         p = os.path.join(cls.CACHE_DIR, f"{key}.jpg")
         return p if os.path.isfile(p) and os.path.getsize(p) > 0 else None
@@ -132,23 +144,31 @@ class AlbumArtworkCache:
         cls,
         artist: str,
         album: str,
-        sample_path: str,
+        sample_path_or_paths: Any,
         max_dim: int = 300
     ) -> Optional[str]:
         cached = cls.get_cached_cover_path(artist, album)
         if cached:
             return cached
 
-        raw_bytes = MetadataReader.extract_artwork_bytes(sample_path)
+        paths = sample_path_or_paths if isinstance(sample_path_or_paths, (list, tuple)) else [sample_path_or_paths]
+        raw_bytes = None
+        for p in paths:
+            if not p:
+                continue
+            raw_bytes = MetadataReader.extract_artwork_bytes(p)
+            if raw_bytes:
+                break
+
         if not raw_bytes:
             return None
 
         try:
-            cls._ensure_dir()
+            cls._ensure_init()
             image = Image.open(io.BytesIO(raw_bytes))
             if image.width > max_dim or image.height > max_dim:
                 image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-            if image.mode in ("RGBA", "P"):
+            if image.mode != "RGB":
                 image = image.convert("RGB")
             key = cls.get_cache_key(artist, album)
             target_path = os.path.join(cls.CACHE_DIR, f"{key}.jpg")
@@ -162,17 +182,49 @@ class AlbumArtworkCache:
         cls,
         artist: str,
         album: str,
-        sample_path: str,
+        sample_path_or_paths: Any,
         on_loaded_callback,
         max_dim: int = 300
     ):
-        import threading
+        cls._ensure_init()
         from gi.repository import GLib
 
-        def worker():
-            path = cls.get_or_extract_cover_path(artist, album, sample_path, max_dim=max_dim)
-            if path:
-                GLib.idle_add(lambda: on_loaded_callback(path))
+        cached = cls.get_cached_cover_path(artist, album)
+        if cached:
+            GLib.idle_add(lambda: on_loaded_callback(cached))
+            return
 
-        threading.Thread(target=worker, daemon=True).start()
+        key = cls.get_cache_key(artist, album)
+        with cls._lock:
+            if key in cls._in_flight:
+                return
+            cls._in_flight.add(key)
+
+        def worker():
+            try:
+                path = cls.get_or_extract_cover_path(artist, album, sample_path_or_paths, max_dim=max_dim)
+                if path:
+                    GLib.idle_add(lambda: on_loaded_callback(path))
+            finally:
+                with cls._lock:
+                    cls._in_flight.discard(key)
+
+        cls._executor.submit(worker)
+
+    @classmethod
+    def preload_album_covers(cls, albums: list):
+        """Preloads artwork cache in background thread for all albums without blocking UI."""
+        cls._ensure_init()
+        import threading
+
+        def preloader():
+            for alb in albums:
+                cached = cls.get_cached_cover_path(alb["artist"], alb["album"])
+                if cached:
+                    continue
+                paths = alb.get("sample_paths") or ([alb["sample_path"]] if alb.get("sample_path") else [])
+                if paths:
+                    cls.get_or_extract_cover_path(alb["artist"], alb["album"], paths, max_dim=300)
+
+        threading.Thread(target=preloader, daemon=True, name="art_preloader").start()
 

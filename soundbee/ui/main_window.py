@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List, Set, Tuple
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib, Pango
+from gi.repository import Gtk, Adw, GLib, Pango, Gdk
 
 from ..core.database import LibraryDatabase
 from ..core.scanner import LibraryScanner
@@ -62,6 +62,37 @@ class MainWindow(Adw.ApplicationWindow):
         self.detector.add_change_listener(lambda: GLib.idle_add(self._refresh_devices))
 
     def _build_ui(self):
+        # Custom CSS for album artwork styling
+        try:
+            display = Gdk.Display.get_default()
+            if display:
+                css_provider = Gtk.CssProvider()
+                css_provider.load_from_data(b"""
+                .album-cover-grid {
+                    border-radius: 8px;
+                    overflow: hidden;
+                    background-color: alpha(currentColor, 0.05);
+                }
+                .album-cover-grid picture, .album-cover-grid image {
+                    border-radius: 8px;
+                }
+                .album-cover-thumb {
+                    border-radius: 6px;
+                    overflow: hidden;
+                    background-color: alpha(currentColor, 0.05);
+                }
+                .album-cover-thumb picture, .album-cover-thumb image {
+                    border-radius: 6px;
+                }
+                """)
+                Gtk.StyleContext.add_provider_for_display(
+                    display,
+                    css_provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                )
+        except Exception:
+            pass
+
         # Toast overlay for floating feedback notifications
         self.toast_overlay = Adw.ToastOverlay()
         self.set_content(self.toast_overlay)
@@ -581,21 +612,40 @@ class MainWindow(Adw.ApplicationWindow):
         header_box.append(check_album)
 
         # Album icon / cover thumbnail
-        img = Gtk.Image.new_from_icon_name("media-optical-symbolic")
-        img.set_pixel_size(56)
-        img.set_size_request(56, 56)
-        header_box.append(img)
+        stack_thumb = Gtk.Stack()
+        stack_thumb.set_size_request(56, 56)
+        stack_thumb.add_css_class("album-cover-thumb")
+        stack_thumb.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
-        # Asynchronously load album cover
+        placeholder = Gtk.Image.new_from_icon_name("media-optical-symbolic")
+        placeholder.set_pixel_size(40)
+        placeholder.set_size_request(56, 56)
+        stack_thumb.add_named(placeholder, "placeholder")
+
+        pic_cover = Gtk.Picture()
+        pic_cover.set_can_shrink(True)
+        pic_cover.set_content_fit(Gtk.ContentFit.COVER)
+        pic_cover.set_size_request(56, 56)
+        stack_thumb.add_named(pic_cover, "cover")
+
+        header_box.append(stack_thumb)
+
+        def set_card_cover(path: str):
+            pic_cover.set_filename(path)
+            stack_thumb.set_visible_child_name("cover")
+
         cached_cover = AlbumArtworkCache.get_cached_cover_path(album["artist"], album["album"])
         if cached_cover:
-            img.set_from_file(cached_cover)
-        elif album.get("sample_path"):
-            AlbumArtworkCache.load_cover_async(
-                album["artist"], album["album"], album["sample_path"],
-                lambda p, im=img: im.set_from_file(p),
-                max_dim=160
-            )
+            set_card_cover(cached_cover)
+        else:
+            stack_thumb.set_visible_child_name("placeholder")
+            candidate_paths = album.get("sample_paths") or ([album["sample_path"]] if album.get("sample_path") else [])
+            if candidate_paths:
+                AlbumArtworkCache.load_cover_async(
+                    album["artist"], album["album"], candidate_paths,
+                    set_card_cover,
+                    max_dim=160
+                )
 
         # Title & Artist Column
         text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -729,22 +779,42 @@ class MainWindow(Adw.ApplicationWindow):
         cover_area.set_margin_end(8)
         tile.append(cover_area)
 
-        img_cover = Gtk.Image.new_from_icon_name("media-optical-symbolic")
-        img_cover.set_pixel_size(140)
-        img_cover.set_size_request(154, 154)
-        img_cover.add_css_class("card")
-        cover_area.append(img_cover)
+        stack_cover = Gtk.Stack()
+        stack_cover.set_size_request(154, 154)
+        stack_cover.add_css_class("album-cover-grid")
+        stack_cover.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
-        # Asynchronously load album cover
+        placeholder = Gtk.Image.new_from_icon_name("media-optical-symbolic")
+        placeholder.set_pixel_size(96)
+        placeholder.set_size_request(154, 154)
+        placeholder.add_css_class("card")
+        stack_cover.add_named(placeholder, "placeholder")
+
+        pic_cover = Gtk.Picture()
+        pic_cover.set_can_shrink(True)
+        pic_cover.set_content_fit(Gtk.ContentFit.COVER)
+        pic_cover.set_size_request(154, 154)
+        pic_cover.add_css_class("card")
+        stack_cover.add_named(pic_cover, "cover")
+
+        cover_area.append(stack_cover)
+
+        def set_grid_cover(path: str):
+            pic_cover.set_filename(path)
+            stack_cover.set_visible_child_name("cover")
+
         cached_cover = AlbumArtworkCache.get_cached_cover_path(album["artist"], album["album"])
         if cached_cover:
-            img_cover.set_from_file(cached_cover)
-        elif album.get("sample_path"):
-            AlbumArtworkCache.load_cover_async(
-                album["artist"], album["album"], album["sample_path"],
-                lambda p, im=img_cover: im.set_from_file(p),
-                max_dim=300
-            )
+            set_grid_cover(cached_cover)
+        else:
+            stack_cover.set_visible_child_name("placeholder")
+            candidate_paths = album.get("sample_paths") or ([album["sample_path"]] if album.get("sample_path") else [])
+            if candidate_paths:
+                AlbumArtworkCache.load_cover_async(
+                    album["artist"], album["album"], candidate_paths,
+                    set_grid_cover,
+                    max_dim=300
+                )
 
         # Clicking on cover switches to List view filtered to this album
         gesture = Gtk.GestureClick()
@@ -842,6 +912,9 @@ class MainWindow(Adw.ApplicationWindow):
             for alb in albums:
                 card = self._create_album_card(alb)
                 self.albums_container.append(card)
+
+        # Preload covers for albums in background thread
+        AlbumArtworkCache.preload_album_covers(albums)
 
     def _render_artists_view(self):
         while child := self.artists_listbox.get_first_child():

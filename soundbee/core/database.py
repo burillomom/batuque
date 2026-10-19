@@ -245,12 +245,15 @@ class LibraryDatabase:
                     "track_count": 0,
                     "duration_seconds": 0.0,
                     "has_artwork": t.has_artwork,
-                    "sample_path": t.file_path
+                    "sample_path": t.file_path,
+                    "sample_paths": [t.file_path]
                 }
             album_info = albums_dict[key]
             album_info["tracks"].append(t)
             album_info["track_count"] += 1
             album_info["duration_seconds"] += t.duration_seconds
+            if len(album_info["sample_paths"]) < 5 and t.file_path not in album_info["sample_paths"]:
+                album_info["sample_paths"].append(t.file_path)
             if t.has_artwork:
                 album_info["has_artwork"] = True
             if not album_info["year"] and t.year:
