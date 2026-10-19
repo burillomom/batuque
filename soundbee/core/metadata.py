@@ -242,7 +242,53 @@ class MetadataReader:
 
     @classmethod
     def extract_artwork_bytes(cls, file_path: str) -> Optional[bytes]:
-        """Extract album artwork bytes from file tags or adjacent folder image."""
+        """Extract album artwork bytes from file tags or adjacent folder image (supports local and GIO URIs)."""
+        if file_path.startswith(("smb://", "nfs://", "sftp://", "davs://", "ftp://")):
+            try:
+                import io
+                import gi
+                gi.require_version('Gio', '2.0')
+                from gi.repository import Gio
+                gfile = Gio.File.new_for_uri(file_path)
+
+                # 1. Check parent directory for cover file
+                parent = gfile.get_parent()
+                if parent:
+                    for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "Cover.jpg", "Folder.jpg"]:
+                        cand = parent.get_child(art_name)
+                        if cand.query_exists(None):
+                            try:
+                                s = cand.read(None)
+                                data = s.read_bytes(1024 * 1024 * 6, None).get_data()
+                                s.close()
+                                if data:
+                                    return bytes(data)
+                            except Exception:
+                                pass
+
+                # 2. Extract embedded tags from stream
+                stream = gfile.read(None)
+                data = stream.read_bytes(1024 * 1024 * 2, None).get_data()
+                stream.close()
+                if data:
+                    audio = mutagen.File(io.BytesIO(data), filename=gfile.get_basename())
+                    if audio and audio.tags:
+                        ext = os.path.splitext(gfile.get_basename())[1].lower()
+                        if ext == ".mp3":
+                            for key, val in audio.tags.items():
+                                if isinstance(val, APIC):
+                                    return val.data
+                        elif ext == ".flac" and hasattr(audio, "pictures"):
+                            if audio.pictures:
+                                return audio.pictures[0].data
+                        elif ext in (".m4a", ".aac") and "covr" in audio.tags:
+                            covr = audio.tags["covr"]
+                            if covr and len(covr) > 0:
+                                return bytes(covr[0])
+            except Exception:
+                pass
+            return None
+
         ext = os.path.splitext(file_path)[1].lower()
         try:
             audio = mutagen.File(file_path)
@@ -263,7 +309,7 @@ class MetadataReader:
 
         # Check folder
         dir_path = os.path.dirname(file_path)
-        for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg"]:
+        for art_name in ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "album.jpg", "Cover.jpg", "Folder.jpg"]:
             cand = os.path.join(dir_path, art_name)
             if os.path.isfile(cand):
                 try:

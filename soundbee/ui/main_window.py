@@ -10,12 +10,13 @@ from typing import Optional, Dict, Any, List, Set, Tuple
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Pango
 
 from ..core.database import LibraryDatabase
 from ..core.scanner import LibraryScanner
 from ..core.sync_engine import SyncEngine
 from ..core.nas import NASManager
+from ..core.artwork import AlbumArtworkCache
 from ..core.models import Track, DeviceProfile, NASSource
 from ..devices.detector import DeviceDetector, DetectedDevice
 from ..devices.manager import DeviceManager
@@ -37,6 +38,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.selected_device_profile: Optional[DeviceProfile] = None
         self.current_view_mode = "albums"  # "albums", "artists", "years", "genres", "tracks"
+        self.album_view_style = "grid"  # "grid" or "list"
         self.search_query = ""
         self.sort_criterion = "artist"
         self.sort_descending = False
@@ -239,22 +241,63 @@ class MainWindow(Adw.ApplicationWindow):
         self.sort_dropdown.connect("notify::selected", self._on_sort_changed)
         toolbar.append(self.sort_dropdown)
 
+        # Album view style toggle (Grid vs List)
+        self.box_album_style = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.box_album_style.add_css_class("linked")
+
+        self.btn_album_grid = Gtk.ToggleButton(icon_name="view-grid-symbolic")
+        self.btn_album_grid.set_tooltip_text("Visualização em Grade de Capas")
+        self.btn_album_grid.set_active(True)
+        self.btn_album_grid.connect("toggled", lambda b: b.get_active() and self._switch_album_style("grid"))
+        self.box_album_style.append(self.btn_album_grid)
+
+        self.btn_album_list = Gtk.ToggleButton(icon_name="view-list-symbolic")
+        self.btn_album_list.set_tooltip_text("Visualização em Lista / Cards com Faixas")
+        self.btn_album_list.connect("toggled", lambda b: b.get_active() and self._switch_album_style("list"))
+        self.box_album_style.append(self.btn_album_list)
+
+        toolbar.append(self.box_album_style)
+
         # Inner Library Stack for different viewing styles
         self.lib_stack = Gtk.Stack()
         self.lib_stack.set_vexpand(True)
         self.lib_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         lib_box.append(self.lib_stack)
 
-        # View A: Albums (Album & Tracks Grouped View)
-        scroll_albums = Gtk.ScrolledWindow()
-        scroll_albums.set_vexpand(True)
+        # View A: Albums (Stack supporting Grid Mode and List Mode)
+        self.albums_stack = Gtk.Stack()
+        self.albums_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+
+        # A1: Responsive Cover Grid (FlowBox)
+        scroll_albums_grid = Gtk.ScrolledWindow()
+        scroll_albums_grid.set_vexpand(True)
+        self.albums_flowbox = Gtk.FlowBox()
+        self.albums_flowbox.set_valign(Gtk.Align.START)
+        self.albums_flowbox.set_max_children_per_line(24)
+        self.albums_flowbox.set_min_children_per_line(2)
+        self.albums_flowbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.albums_flowbox.set_homogeneous(True)
+        self.albums_flowbox.set_row_spacing(16)
+        self.albums_flowbox.set_column_spacing(16)
+        self.albums_flowbox.set_margin_start(16)
+        self.albums_flowbox.set_margin_end(16)
+        self.albums_flowbox.set_margin_top(16)
+        self.albums_flowbox.set_margin_bottom(16)
+        scroll_albums_grid.set_child(self.albums_flowbox)
+        self.albums_stack.add_named(scroll_albums_grid, "grid")
+
+        # A2: List / Grouped Cards View
+        scroll_albums_list = Gtk.ScrolledWindow()
+        scroll_albums_list.set_vexpand(True)
         self.albums_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         self.albums_container.set_margin_start(16)
         self.albums_container.set_margin_end(16)
         self.albums_container.set_margin_top(12)
         self.albums_container.set_margin_bottom(16)
-        scroll_albums.set_child(self.albums_container)
-        self.lib_stack.add_named(scroll_albums, "albums")
+        scroll_albums_list.set_child(self.albums_container)
+        self.albums_stack.add_named(scroll_albums_list, "list")
+
+        self.lib_stack.add_named(self.albums_stack, "albums")
 
         # View B: Artists Master-Detail Paned
         self.paned_artists = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -440,9 +483,20 @@ class MainWindow(Adw.ApplicationWindow):
         self.btn_view_genres.set_active(mode == "genres")
         self.btn_view_tracks.set_active(mode == "tracks")
 
+        self.box_album_style.set_visible(mode == "albums")
+        if mode == "albums":
+            self.albums_stack.set_visible_child_name(self.album_view_style)
+
         self.lib_stack.set_visible_child_name(mode)
         self.stack.set_visible_child_name("library")
         self._refresh_library()
+
+    def _switch_album_style(self, style: str):
+        self.album_view_style = style
+        self.btn_album_grid.set_active(style == "grid")
+        self.btn_album_list.set_active(style == "list")
+        self.albums_stack.set_visible_child_name(style)
+        self._render_albums_view()
 
     def _on_sort_changed(self, dropdown, *args):
         idx = dropdown.get_selected()
@@ -528,8 +582,20 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Album icon / cover thumbnail
         img = Gtk.Image.new_from_icon_name("media-optical-symbolic")
-        img.set_pixel_size(44)
+        img.set_pixel_size(56)
+        img.set_size_request(56, 56)
         header_box.append(img)
+
+        # Asynchronously load album cover
+        cached_cover = AlbumArtworkCache.get_cached_cover_path(album["artist"], album["album"])
+        if cached_cover:
+            img.set_from_file(cached_cover)
+        elif album.get("sample_path"):
+            AlbumArtworkCache.load_cover_async(
+                album["artist"], album["album"], album["sample_path"],
+                lambda p, im=img: im.set_from_file(p),
+                max_dim=160
+            )
 
         # Title & Artist Column
         text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -644,19 +710,138 @@ class MainWindow(Adw.ApplicationWindow):
 
         return card
 
-    def _render_albums_view(self):
-        while child := self.albums_container.get_first_child():
-            self.albums_container.remove(child)
+    def _create_album_grid_tile(self, album: Dict[str, Any]) -> Gtk.Widget:
+        """Constructs an elegant, modern Album Tile for the Cover Grid view."""
+        tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        tile.add_css_class("card")
+        tile.set_size_request(170, 260)
+        tile.set_margin_bottom(4)
 
+        album_tracks: List[Track] = album["tracks"]
+        album_track_ids = [t.id for t in album_tracks if t.id is not None]
+
+        # 1. Cover container with click gesture
+        cover_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        cover_area.set_size_request(160, 160)
+        cover_area.set_halign(Gtk.Align.CENTER)
+        cover_area.set_margin_top(8)
+        cover_area.set_margin_start(8)
+        cover_area.set_margin_end(8)
+        tile.append(cover_area)
+
+        img_cover = Gtk.Image.new_from_icon_name("media-optical-symbolic")
+        img_cover.set_pixel_size(140)
+        img_cover.set_size_request(154, 154)
+        img_cover.add_css_class("card")
+        cover_area.append(img_cover)
+
+        # Asynchronously load album cover
+        cached_cover = AlbumArtworkCache.get_cached_cover_path(album["artist"], album["album"])
+        if cached_cover:
+            img_cover.set_from_file(cached_cover)
+        elif album.get("sample_path"):
+            AlbumArtworkCache.load_cover_async(
+                album["artist"], album["album"], album["sample_path"],
+                lambda p, im=img_cover: im.set_from_file(p),
+                max_dim=300
+            )
+
+        # Clicking on cover switches to List view filtered to this album
+        gesture = Gtk.GestureClick()
+        def on_cover_clicked(g, n_press, x, y, al=album):
+            self.search_entry.set_text(al["album"])
+            self._switch_album_style("list")
+        gesture.connect("released", on_cover_clicked)
+        cover_area.add_controller(gesture)
+
+        # 2. Metadata: Album title and artist
+        meta_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        meta_box.set_margin_start(10)
+        meta_box.set_margin_end(10)
+        tile.append(meta_box)
+
+        lbl_title = Gtk.Label(label=album["album"], xalign=0)
+        lbl_title.add_css_class("heading")
+        lbl_title.set_ellipsize(Pango.EllipsizeMode.END)
+        lbl_title.set_tooltip_text(album["album"])
+        meta_box.append(lbl_title)
+
+        year_str = f" • {album['year']}" if album["year"] else ""
+        lbl_artist = Gtk.Label(label=f"{album['artist']}{year_str}", xalign=0)
+        lbl_artist.add_css_class("dim-label")
+        lbl_artist.set_ellipsize(Pango.EllipsizeMode.END)
+        meta_box.append(lbl_artist)
+
+        # 3. Bottom Action Row: Checkbox, track count & send button
+        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        action_row.set_margin_start(8)
+        action_row.set_margin_end(8)
+        action_row.set_margin_bottom(8)
+        action_row.set_margin_top(4)
+        tile.append(action_row)
+
+        check_album = Gtk.CheckButton()
+        check_album.set_tooltip_text("Selecionar todas as faixas deste álbum")
+        selected_in_album = [tid for tid in album_track_ids if tid in self.selected_track_ids]
+        if selected_in_album and len(selected_in_album) == len(album_track_ids):
+            check_album.set_active(True)
+        elif selected_in_album:
+            check_album.set_inconsistent(True)
+
+        def on_tile_check_toggled(btn, t_ids=album_track_ids):
+            if self._updating_checks:
+                return
+            self._updating_checks = True
+            is_active = btn.get_active()
+            btn.set_inconsistent(False)
+            for tid in t_ids:
+                if is_active:
+                    self.selected_track_ids.add(tid)
+                else:
+                    self.selected_track_ids.discard(tid)
+            self._updating_checks = False
+            self._update_selection_bar()
+
+        check_album.connect("toggled", on_tile_check_toggled)
+        action_row.append(check_album)
+
+        lbl_count = Gtk.Label(label=f"{album['track_count']} faixas", xalign=0)
+        lbl_count.add_css_class("dim-label")
+        lbl_count.set_hexpand(True)
+        action_row.append(lbl_count)
+
+        btn_send = Gtk.Button.new_from_icon_name("document-send-symbolic")
+        btn_send.set_tooltip_text(f"Enviar álbum '{album['album']}' para o dispositivo")
+        btn_send.add_css_class("flat")
+        btn_send.connect(
+            "clicked",
+            lambda b, al=album: self._send_tracks_to_device(al["tracks"], title=f"Álbum '{al['album']}'")
+        )
+        action_row.append(btn_send)
+
+        return tile
+
+    def _render_albums_view(self):
         albums = self.db.get_albums_grouped(
             order_by=self.sort_criterion,
             order_desc=self.sort_descending,
             search_query=self.search_query
         )
 
-        for alb in albums:
-            card = self._create_album_card(alb)
-            self.albums_container.append(card)
+        if self.album_view_style == "grid":
+            while child := self.albums_flowbox.get_first_child():
+                self.albums_flowbox.remove(child)
+
+            for alb in albums:
+                tile = self._create_album_grid_tile(alb)
+                self.albums_flowbox.append(tile)
+        else:
+            while child := self.albums_container.get_first_child():
+                self.albums_container.remove(child)
+
+            for alb in albums:
+                card = self._create_album_card(alb)
+                self.albums_container.append(card)
 
     def _render_artists_view(self):
         while child := self.artists_listbox.get_first_child():

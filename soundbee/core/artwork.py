@@ -101,3 +101,78 @@ class ArtworkProcessor:
                 audio.save()
         except Exception:
             pass
+
+
+class AlbumArtworkCache:
+    """
+    Local disk cache for album artwork to allow instantaneous UI rendering
+    without continuous network requests to NAS or repeated file tag decoding.
+    """
+    CACHE_DIR = os.path.expanduser("~/.cache/soundbee/covers")
+
+    @classmethod
+    def _ensure_dir(cls):
+        os.makedirs(cls.CACHE_DIR, exist_ok=True)
+
+    @classmethod
+    def get_cache_key(cls, artist: str, album: str) -> str:
+        import hashlib
+        raw = f"{artist.strip().lower()}:::{album.strip().lower()}".encode("utf-8")
+        return hashlib.md5(raw).hexdigest()[:16]
+
+    @classmethod
+    def get_cached_cover_path(cls, artist: str, album: str) -> Optional[str]:
+        cls._ensure_dir()
+        key = cls.get_cache_key(artist, album)
+        p = os.path.join(cls.CACHE_DIR, f"{key}.jpg")
+        return p if os.path.isfile(p) and os.path.getsize(p) > 0 else None
+
+    @classmethod
+    def get_or_extract_cover_path(
+        cls,
+        artist: str,
+        album: str,
+        sample_path: str,
+        max_dim: int = 300
+    ) -> Optional[str]:
+        cached = cls.get_cached_cover_path(artist, album)
+        if cached:
+            return cached
+
+        raw_bytes = MetadataReader.extract_artwork_bytes(sample_path)
+        if not raw_bytes:
+            return None
+
+        try:
+            cls._ensure_dir()
+            image = Image.open(io.BytesIO(raw_bytes))
+            if image.width > max_dim or image.height > max_dim:
+                image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+            key = cls.get_cache_key(artist, album)
+            target_path = os.path.join(cls.CACHE_DIR, f"{key}.jpg")
+            image.save(target_path, format="JPEG", quality=88)
+            return target_path
+        except Exception:
+            return None
+
+    @classmethod
+    def load_cover_async(
+        cls,
+        artist: str,
+        album: str,
+        sample_path: str,
+        on_loaded_callback,
+        max_dim: int = 300
+    ):
+        import threading
+        from gi.repository import GLib
+
+        def worker():
+            path = cls.get_or_extract_cover_path(artist, album, sample_path, max_dim=max_dim)
+            if path:
+                GLib.idle_add(lambda: on_loaded_callback(path))
+
+        threading.Thread(target=worker, daemon=True).start()
+
