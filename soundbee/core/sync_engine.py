@@ -19,7 +19,12 @@ class SyncEngine:
     def cancel(self):
         self._is_cancelled = True
 
-    def create_sync_plan(self, profile: DeviceProfile, tracks_to_sync: List[Track]) -> SyncPlan:
+    def create_sync_plan(
+        self,
+        profile: DeviceProfile,
+        tracks_to_sync: List[Track],
+        allow_delete: bool = True
+    ) -> SyncPlan:
         """
         Analyzes differences between source library and target device.
         Produces an execution plan with actions: copy, transcode, skip, delete.
@@ -120,7 +125,7 @@ class SyncEngine:
                 plan.total_transfer_bytes += est_size
 
         # Find orphaned files to delete if prune is enabled
-        if profile.delete_unmatched_files and os.path.isdir(music_dest_dir):
+        if allow_delete and profile.delete_unmatched_files and os.path.isdir(music_dest_dir):
             for root, _, files in os.walk(music_dest_dir):
                 for f in files:
                     full_p = os.path.abspath(os.path.join(root, f))

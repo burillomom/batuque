@@ -6,7 +6,7 @@ Features rich library sorting and grouping by Albums, Artists, Years, Genres, an
 
 import os
 import threading
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set, Tuple
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -45,6 +45,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.filter_genre: Optional[str] = None
         self.filter_year: Optional[int] = None
 
+        # Selection and quick-send management
+        self.selected_track_ids: Set[int] = set()
+        self.available_devices: List[DeviceProfile] = []
+        self.active_target_device: Optional[DeviceProfile] = None
+        self._updating_checks: bool = False
+
         self._build_ui()
         self._refresh_library()
         self._refresh_devices()
@@ -54,13 +60,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.detector.add_change_listener(lambda: GLib.idle_add(self._refresh_devices))
 
     def _build_ui(self):
+        # Toast overlay for floating feedback notifications
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
+
         # Main vertical box
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_content(main_box)
+        self.toast_overlay.set_child(main_box)
 
         # Header bar
         header = Adw.HeaderBar()
         main_box.append(header)
+
+        # Quick selection buttons in header
+        btn_sel_all = Gtk.Button(icon_name="edit-select-all-symbolic")
+        btn_sel_all.set_tooltip_text("Selecionar todas as músicas visíveis")
+        btn_sel_all.connect("clicked", lambda b: self._select_visible_tracks())
+        header.pack_start(btn_sel_all)
+
+        btn_clear_sel = Gtk.Button(icon_name="edit-clear-all-symbolic")
+        btn_clear_sel.set_tooltip_text("Limpar seleção de músicas")
+        btn_clear_sel.connect("clicked", lambda b: self._clear_selection())
+        header.pack_start(btn_clear_sel)
 
         # Search Entry in header
         self.search_entry = Gtk.SearchEntry()
@@ -294,6 +315,58 @@ class MainWindow(Adw.ApplicationWindow):
         scroll_tracks.set_child(self.track_listbox)
         self.lib_stack.add_named(scroll_tracks, "tracks")
 
+        # Selection Action Bar (Sticky at bottom of library)
+        self.selection_bar = Gtk.ActionBar()
+        self.selection_bar.set_revealed(False)
+        lib_box.append(self.selection_bar)
+
+        # Start box: Selection count & Clear button
+        sel_start_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.lbl_selection = Gtk.Label(label="0 faixas selecionadas")
+        self.lbl_selection.add_css_class("heading")
+        sel_start_box.append(self.lbl_selection)
+
+        btn_clear = Gtk.Button(label="Limpar")
+        btn_clear.add_css_class("flat")
+        btn_clear.connect("clicked", lambda b: self._clear_selection())
+        sel_start_box.append(btn_clear)
+        self.selection_bar.pack_start(sel_start_box)
+
+        # Center box: Progress bar during live transfer
+        self.sel_progress_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.sel_progress_bar = Gtk.ProgressBar()
+        self.sel_progress_bar.set_size_request(220, -1)
+        self.sel_progress_bar.set_show_text(True)
+        self.sel_progress_label = Gtk.Label(label="")
+        self.sel_progress_label.add_css_class("dim-label")
+        self.sel_progress_box.append(self.sel_progress_bar)
+        self.sel_progress_box.append(self.sel_progress_label)
+        self.sel_progress_box.set_visible(False)
+        self.selection_bar.set_center_widget(self.sel_progress_box)
+
+        # End box: Target device, Save to profile, and Send Selected
+        sel_end_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lbl_target = Gtk.Label(label="Destino:")
+        lbl_target.add_css_class("dim-label")
+        sel_end_box.append(lbl_target)
+
+        self.combo_target_device = Gtk.DropDown()
+        self.combo_target_device.connect("notify::selected", self._on_target_device_changed)
+        sel_end_box.append(self.combo_target_device)
+
+        btn_save_to_device = Gtk.Button(label="💾 Salvar no Perfil")
+        btn_save_to_device.set_tooltip_text("Salva as faixas selecionadas no perfil do dispositivo para sincronizações futuras")
+        btn_save_to_device.connect("clicked", self._on_save_selection_to_device)
+        sel_end_box.append(btn_save_to_device)
+
+        self.btn_send_selected = Gtk.Button(label="🚀 Enviar Selecionados")
+        self.btn_send_selected.add_css_class("suggested-action")
+        self.btn_send_selected.set_tooltip_text("Copia ou converte as faixas selecionadas diretamente para o dispositivo")
+        self.btn_send_selected.connect("clicked", self._on_send_selected_clicked)
+        sel_end_box.append(self.btn_send_selected)
+
+        self.selection_bar.pack_end(sel_end_box)
+
         # Library status bar
         self.lbl_stats = Gtk.Label(label="Carregando biblioteca...", xalign=0)
         self.lbl_stats.set_margin_start(16)
@@ -327,6 +400,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.row_dev_naming = Adw.ActionRow()
         self.row_dev_naming.set_title("Regra de Pastas")
         self.dev_info_group.add(self.row_dev_naming)
+
+        self.row_dev_scope = Adw.ActionRow()
+        self.row_dev_scope.set_title("Modo de Sincronização")
+        self.dev_info_group.add(self.row_dev_scope)
 
         self.device_box.append(self.dev_info_group)
 
@@ -408,11 +485,28 @@ class MainWindow(Adw.ApplicationWindow):
             f"{stats['tracks']} músicas • {stats['artists']} artistas • {stats['albums']} álbuns • {hours:.1f}h • {gb:.2f} GB"
         )
 
+    def _update_album_check_state(self, check_album: Gtk.CheckButton, album_track_ids: List[int]):
+        selected = [tid for tid in album_track_ids if tid in self.selected_track_ids]
+        self._updating_checks = True
+        if len(selected) == len(album_track_ids) and len(album_track_ids) > 0:
+            check_album.set_inconsistent(False)
+            check_album.set_active(True)
+        elif len(selected) > 0:
+            check_album.set_inconsistent(True)
+            check_album.set_active(False)
+        else:
+            check_album.set_inconsistent(False)
+            check_album.set_active(False)
+        self._updating_checks = False
+
     def _create_album_card(self, album: Dict[str, Any]) -> Gtk.Widget:
-        """Constructs an elegant Album Card with header and ordered tracklist (MusicBee style)."""
+        """Constructs an elegant Album Card with header, selection checkboxes, quick send, and ordered tracklist."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("card")
         card.set_margin_bottom(8)
+
+        album_tracks: List[Track] = album["tracks"]
+        album_track_ids = [t.id for t in album_tracks if t.id is not None]
 
         # Header Box
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -421,6 +515,16 @@ class MainWindow(Adw.ApplicationWindow):
         header_box.set_margin_top(12)
         header_box.set_margin_bottom(8)
         card.append(header_box)
+
+        # Album Selection Checkbox
+        check_album = Gtk.CheckButton()
+        check_album.set_tooltip_text("Selecionar todas as faixas deste álbum")
+        selected_in_album = [tid for tid in album_track_ids if tid in self.selected_track_ids]
+        if selected_in_album and len(selected_in_album) == len(album_track_ids):
+            check_album.set_active(True)
+        elif selected_in_album:
+            check_album.set_inconsistent(True)
+        header_box.append(check_album)
 
         # Album icon / cover thumbnail
         img = Gtk.Image.new_from_icon_name("media-optical-symbolic")
@@ -449,6 +553,22 @@ class MainWindow(Adw.ApplicationWindow):
             genre_lbl.add_css_class("dim-label")
             header_box.append(genre_lbl)
 
+        # Quick Send Album Button
+        btn_send_album = Gtk.Button()
+        btn_send_album.set_tooltip_text(f"Enviar álbum '{album['album']}' para o dispositivo de destino")
+        btn_send_album.add_css_class("flat")
+        box_send_alb = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        img_send = Gtk.Image.new_from_icon_name("document-send-symbolic")
+        lbl_send = Gtk.Label(label="Enviar Álbum")
+        box_send_alb.append(img_send)
+        box_send_alb.append(lbl_send)
+        btn_send_album.set_child(box_send_alb)
+        btn_send_album.connect(
+            "clicked",
+            lambda b, al=album: self._send_tracks_to_device(al["tracks"], title=f"Álbum '{al['album']}'")
+        )
+        header_box.append(btn_send_album)
+
         # Tracklist
         track_list = Gtk.ListBox()
         track_list.add_css_class("boxed-list")
@@ -457,10 +577,30 @@ class MainWindow(Adw.ApplicationWindow):
         track_list.set_margin_bottom(12)
         card.append(track_list)
 
+        track_cboxes: List[Tuple[Track, Gtk.CheckButton]] = []
+
         for t in album["tracks"]:
             row = Adw.ActionRow()
             track_num = f"{t.track_number:02d}" if t.track_number else "•"
             row.set_title(t.display_title)
+
+            # Checkbox for this track
+            check_t = Gtk.CheckButton()
+            check_t.set_active(t.id in self.selected_track_ids)
+            track_cboxes.append((t, check_t))
+
+            def on_track_toggled(btn, trk=t, ca=check_album, t_ids=album_track_ids):
+                if self._updating_checks:
+                    return
+                if btn.get_active():
+                    self.selected_track_ids.add(trk.id)
+                else:
+                    self.selected_track_ids.discard(trk.id)
+                self._update_album_check_state(ca, t_ids)
+                self._update_selection_bar()
+
+            check_t.connect("toggled", on_track_toggled)
+            row.add_prefix(check_t)
 
             lbl_num = Gtk.Label(label=track_num)
             lbl_num.add_css_class("dim-label")
@@ -473,7 +613,34 @@ class MainWindow(Adw.ApplicationWindow):
             lbl_dur.add_css_class("dim-label")
             row.add_suffix(lbl_dur)
 
+            # Quick send button for single track
+            btn_send_t = Gtk.Button.new_from_icon_name("document-send-symbolic")
+            btn_send_t.set_tooltip_text(f"Enviar '{t.display_title}' para o dispositivo")
+            btn_send_t.add_css_class("flat")
+            btn_send_t.connect(
+                "clicked",
+                lambda b, trk=t: self._send_tracks_to_device([trk], title=f"'{trk.display_title}'")
+            )
+            row.add_suffix(btn_send_t)
+
             track_list.append(row)
+
+        def on_album_toggled(btn, cboxes=track_cboxes):
+            if self._updating_checks:
+                return
+            self._updating_checks = True
+            is_active = btn.get_active()
+            btn.set_inconsistent(False)
+            for trk, cb in cboxes:
+                cb.set_active(is_active)
+                if is_active:
+                    self.selected_track_ids.add(trk.id)
+                else:
+                    self.selected_track_ids.discard(trk.id)
+            self._updating_checks = False
+            self._update_selection_bar()
+
+        check_album.connect("toggled", on_album_toggled)
 
         return card
 
@@ -618,6 +785,22 @@ class MainWindow(Adw.ApplicationWindow):
             row.set_title(title)
             row.set_subtitle(artist_album)
 
+            # Checkbox
+            check_t = Gtk.CheckButton()
+            check_t.set_active(t.id in self.selected_track_ids)
+
+            def on_t_toggle(btn, trk=t):
+                if self._updating_checks:
+                    return
+                if btn.get_active():
+                    self.selected_track_ids.add(trk.id)
+                else:
+                    self.selected_track_ids.discard(trk.id)
+                self._update_selection_bar()
+
+            check_t.connect("toggled", on_t_toggle)
+            row.add_prefix(check_t)
+
             mins = int(t.duration_seconds // 60)
             secs = int(t.duration_seconds % 60)
             dur_str = f"{mins}:{secs:02d}"
@@ -626,7 +809,170 @@ class MainWindow(Adw.ApplicationWindow):
             lbl_tech.add_css_class("dim-label")
             row.add_suffix(lbl_tech)
 
+            # Quick send button
+            btn_send = Gtk.Button.new_from_icon_name("document-send-symbolic")
+            btn_send.set_tooltip_text(f"Enviar '{t.display_title}' para o dispositivo")
+            btn_send.add_css_class("flat")
+            btn_send.connect(
+                "clicked",
+                lambda b, trk=t: self._send_tracks_to_device([trk], title=f"'{trk.display_title}'")
+            )
+            row.add_suffix(btn_send)
+
             self.track_listbox.append(row)
+
+    def _update_selection_bar(self):
+        count = len(self.selected_track_ids)
+        if count == 0:
+            if not self.sel_progress_box.get_visible():
+                self.selection_bar.set_revealed(False)
+            return
+
+        self.lbl_selection.set_text(f"{count} faixa{'s' if count > 1 else ''} selecionada{'s' if count > 1 else ''}")
+        self.selection_bar.set_revealed(True)
+
+    def _clear_selection(self):
+        self.selected_track_ids.clear()
+        self._refresh_library()
+        self._update_selection_bar()
+        self.toast_overlay.add_toast(Adw.Toast.new("Seleção desmarcada"))
+
+    def _select_visible_tracks(self):
+        tracks = self.db.get_tracks_sorted(
+            order_by=self.sort_criterion,
+            order_desc=self.sort_descending,
+            search_query=self.search_query,
+            filter_artist=self.filter_artist,
+            filter_year=self.filter_year,
+            filter_genre=self.filter_genre
+        )
+        for t in tracks:
+            if t.id is not None:
+                self.selected_track_ids.add(t.id)
+        self._refresh_library()
+        self._update_selection_bar()
+        self.toast_overlay.add_toast(Adw.Toast.new(f"{len(self.selected_track_ids)} faixas selecionadas"))
+
+    def _update_target_device_dropdown(self):
+        if not self.available_devices:
+            names = ["Nenhum dispositivo (Clique em Enviar para criar)"]
+            self.combo_target_device.set_model(Gtk.StringList.new(names))
+            self.active_target_device = None
+            return
+
+        names = [f"💾 {d.name}" for d in self.available_devices]
+        self.combo_target_device.set_model(Gtk.StringList.new(names))
+
+        if self.active_target_device and self.active_target_device in self.available_devices:
+            idx = self.available_devices.index(self.active_target_device)
+            self.combo_target_device.set_selected(idx)
+        else:
+            self.active_target_device = self.available_devices[0]
+            self.combo_target_device.set_selected(0)
+
+    def _on_target_device_changed(self, dropdown, *args):
+        idx = dropdown.get_selected()
+        if 0 <= idx < len(self.available_devices):
+            self.active_target_device = self.available_devices[idx]
+
+    def _on_save_selection_to_device(self, *args):
+        target = self.active_target_device or self.selected_device_profile
+        if not target:
+            self.toast_overlay.add_toast(Adw.Toast.new("Nenhum dispositivo disponível para salvar."))
+            return
+        target.selected_track_ids = list(self.selected_track_ids)
+        target.sync_all_library = False
+        self.dev_manager.save_profile(target)
+        self.toast_overlay.add_toast(
+            Adw.Toast.new(f"💾 {len(self.selected_track_ids)} faixas salvas no perfil de '{target.name}'!")
+        )
+
+    def _on_send_selected_clicked(self, *args):
+        if not self.selected_track_ids:
+            self.toast_overlay.add_toast(Adw.Toast.new("Nenhuma faixa selecionada"))
+            return
+        all_tracks = self.db.get_all_tracks()
+        tracks_to_send = [t for t in all_tracks if t.id in self.selected_track_ids]
+        count = len(tracks_to_send)
+        self._send_tracks_to_device(
+            tracks_to_send,
+            title=f"{count} faixa{'s' if count > 1 else ''} selecionada{'s' if count > 1 else ''}"
+        )
+
+    def _send_tracks_to_device(self, tracks: List[Track], title: str = "Faixas"):
+        target = self.active_target_device or self.selected_device_profile
+        if not target:
+            if self.available_devices:
+                target = self.available_devices[0]
+                self.active_target_device = target
+            else:
+                self._prompt_destination_and_send(tracks, title)
+                return
+
+        if not os.path.isdir(target.root_path):
+            self.toast_overlay.add_toast(
+                Adw.Toast.new(f"Aviso: Destino '{target.name}' ({target.root_path}) não está acessível.")
+            )
+            return
+
+        self.toast_overlay.add_toast(Adw.Toast.new(f"Iniciando envio de {title} para '{target.name}'..."))
+        self.sel_progress_box.set_visible(True)
+        self.sel_progress_bar.set_fraction(0.0)
+        self.sel_progress_label.set_text(f"Preparando envio para {target.name}...")
+        self.selection_bar.set_revealed(True)
+
+        def bg_send():
+            plan = self.sync_engine.create_sync_plan(target, tracks, allow_delete=False)
+            total = len(plan.items_to_copy) + len(plan.items_to_transcode)
+            if total == 0:
+                GLib.idle_add(lambda: self._on_send_completed(target, title, "Todos os arquivos já estavam atualizados."))
+                return
+
+            def on_prog(curr, tot, text):
+                fraction = curr / max(tot, 1)
+                GLib.idle_add(lambda: self._update_send_progress(fraction, text))
+
+            success = self.sync_engine.execute_plan(plan, on_progress=on_prog)
+            msg = f"Enviado {total} arquivo(s) com sucesso!" if success else "Envio cancelado ou com erros."
+            GLib.idle_add(lambda: self._on_send_completed(target, title, msg))
+
+        threading.Thread(target=bg_send, daemon=True).start()
+
+    def _prompt_destination_and_send(self, tracks: List[Track], title: str):
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Escolher pasta de destino para envio (Pen drive / Dispositivo)")
+
+        def on_folder(dialog, result):
+            try:
+                folder = dialog.select_folder_finish(result)
+                if folder:
+                    path = folder.get_path()
+                    name = os.path.basename(path) or "Destino"
+                    dev_id = "virt_" + os.urandom(4).hex()
+                    prof = DeviceProfile(
+                        device_id=dev_id,
+                        name=name,
+                        device_type="virtual",
+                        root_path=path
+                    )
+                    self.dev_manager.save_profile(prof)
+                    self._refresh_devices()
+                    self.active_target_device = prof
+                    self._send_tracks_to_device(tracks, title)
+            except Exception:
+                pass
+
+        dlg.select_folder(self, None, on_folder)
+
+    def _update_send_progress(self, fraction: float, text: str):
+        self.sel_progress_box.set_visible(True)
+        self.sel_progress_bar.set_fraction(fraction)
+        self.sel_progress_label.set_text(text)
+
+    def _on_send_completed(self, device: DeviceProfile, title: str, message: str):
+        self.sel_progress_box.set_visible(False)
+        self.toast_overlay.add_toast(Adw.Toast.new(f"✅ {title}: {message}"))
+        self._update_selection_bar()
 
     def _refresh_devices(self):
         while child := self.box_devices.get_first_child():
@@ -635,8 +981,11 @@ class MainWindow(Adw.ApplicationWindow):
         connected = self.detector.list_connected_devices()
         profiles = self.dev_manager.get_all_profiles()
 
+        self.available_devices = []
+
         for d in connected:
             prof = self.dev_manager.get_or_create_profile(d.device_id, d.name, d.root_path, d.device_type)
+            self.available_devices.append(prof)
             btn = Gtk.Button(label=f"💾 {prof.name}")
             btn.set_halign(Gtk.Align.FILL)
             btn.connect("clicked", lambda b, p=prof: self._select_device(p))
@@ -644,10 +993,13 @@ class MainWindow(Adw.ApplicationWindow):
 
         for p in profiles:
             if p.device_type == "virtual" and not any(c.device_id == p.device_id for c in connected):
+                self.available_devices.append(p)
                 btn = Gtk.Button(label=f"📁 {p.name}")
                 btn.set_halign(Gtk.Align.FILL)
                 btn.connect("clicked", lambda b, prof=p: self._select_device(prof))
                 self.box_devices.append(btn)
+
+        self._update_target_device_dropdown()
 
     def _refresh_nas_sources(self):
         while child := self.box_nas.get_first_child():
@@ -670,6 +1022,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.row_dev_codec.set_subtitle(trans_txt)
         self.row_dev_naming.set_subtitle(profile.naming_rule)
 
+        if profile.sync_all_library:
+            scope_str = "Toda a Biblioteca Musical"
+        else:
+            scope_str = f"Apenas Faixas Salvas no Perfil ({len(profile.selected_track_ids)} faixas)"
+        self.row_dev_scope.set_subtitle(scope_str)
+
         self.sync_progress_box.set_visible(False)
         self.stack.set_visible_child_name("device")
 
@@ -689,9 +1047,20 @@ class MainWindow(Adw.ApplicationWindow):
             return
 
         prof = self.selected_device_profile
-        tracks = self.db.get_all_tracks()
-        if not tracks:
+        all_tracks = self.db.get_all_tracks()
+        if not all_tracks:
             return
+
+        if not prof.sync_all_library and prof.selected_track_ids:
+            sel_set = set(prof.selected_track_ids)
+            tracks = [t for t in all_tracks if t.id in sel_set]
+            if not tracks:
+                self.toast_overlay.add_toast(
+                    Adw.Toast.new("Nenhuma faixa da seleção salva foi encontrada na biblioteca.")
+                )
+                return
+        else:
+            tracks = all_tracks
 
         self.sync_progress_box.set_visible(True)
         self.btn_sync_now.set_sensitive(False)

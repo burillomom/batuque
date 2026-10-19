@@ -73,6 +73,8 @@ class DeviceProfile:
     sync_all_library: bool = True
     selected_playlists: List[str] = field(default_factory=list)
     selected_folders: List[str] = field(default_factory=list)
+    selected_albums: List[str] = field(default_factory=list)  # List of "Artist|||Album" keys
+    selected_track_ids: List[int] = field(default_factory=list)
     music_filter: str = ""  # Optional query filter
 
     # Destination paths & file organization
