@@ -68,6 +68,8 @@ class DeviceProfile:
     root_path: str = ""  # Mount point or directory path
     enabled: bool = True
     auto_sync: bool = False
+    is_default: bool = False  # Preferred default target for quick sends and transfers
+    ignored: bool = False     # Excluded from sidebar and auto-detection
 
     # Synchronization scope
     sync_all_library: bool = True

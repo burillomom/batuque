@@ -23,7 +23,8 @@ class SyncEngine:
         self,
         profile: DeviceProfile,
         tracks_to_sync: List[Track],
-        allow_delete: bool = True
+        allow_delete: bool = True,
+        force_overwrite: bool = False
     ) -> SyncPlan:
         """
         Analyzes differences between source library and target device.
@@ -67,8 +68,8 @@ class SyncEngine:
             else:
                 est_size = track.size_bytes
 
-            # Check if file already exists at target
-            if os.path.isfile(target_full):
+            # Check if file already exists at target (unless force_overwrite)
+            if not force_overwrite and os.path.isfile(target_full):
                 dest_size = os.path.getsize(target_full)
                 if not need_transcode:
                     # Direct copy check: compare sizes

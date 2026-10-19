@@ -211,6 +211,125 @@ class TestSoundBee(unittest.TestCase):
         self.assertEqual(subfolder, "Musica")
         self.assertEqual(base, "smb://100.79.195.46/NAS-4TB")
 
+    def test_device_exclusion_and_default(self):
+        p1 = self.dev_manager.get_or_create_profile("dev1", "Game Drive", "/mnt/games")
+        p2 = self.dev_manager.get_or_create_profile("dev2", "iPod Classic", "/mnt/ipod")
+
+        # Set dev2 as default
+        self.dev_manager.set_default_device("dev2")
+        d = self.dev_manager.get_default_profile()
+        self.assertIsNotNone(d)
+        self.assertEqual(d.device_id, "dev2")
+        self.assertTrue(d.is_default)
+        self.assertFalse(self.dev_manager.get_profile("dev1").is_default)
+
+        # Ignore dev1 (Game Drive)
+        self.dev_manager.set_ignored_device("dev1", True)
+        self.assertTrue(self.dev_manager.get_profile("dev1").ignored)
+
+        # If ignored, it cannot be default
+        self.dev_manager.set_ignored_device("dev2", True)
+        self.assertIsNone(self.dev_manager.get_default_profile())
+
+    def test_sync_force_overwrite(self):
+        device_dir = os.path.join(self.temp_dir, "my_dap2")
+        os.makedirs(device_dir, exist_ok=True)
+
+        prof = DeviceProfile(
+            device_id="dap_sync2",
+            name="DAP",
+            root_path=device_dir,
+            transcode_enabled=False,
+            preserve_filenames=True,
+            music_subfolder="Music"
+        )
+
+        src_file = os.path.join(self.temp_dir, "song.mp3")
+        with open(src_file, "wb") as f:
+            f.write(b"AUDIO_DATA_FOR_TESTING")
+
+        t = Track(file_path=src_file, title="Song", artist="Artist", size_bytes=len(b"AUDIO_DATA_FOR_TESTING"), file_format="mp3")
+
+        engine = SyncEngine()
+        plan1 = engine.create_sync_plan(prof, [t])
+        engine.execute_plan(plan1)
+
+        # Standard plan skips
+        plan2 = engine.create_sync_plan(prof, [t], force_overwrite=False)
+        self.assertEqual(len(plan2.items_to_skip), 1)
+        self.assertEqual(len(plan2.items_to_copy), 0)
+
+        # Force overwrite plan schedules copy
+        plan_forced = engine.create_sync_plan(prof, [t], force_overwrite=True)
+        self.assertEqual(len(plan_forced.items_to_skip), 0)
+        self.assertEqual(len(plan_forced.items_to_copy), 1)
+
+    def test_nas_crud(self):
+        nas1 = NASSource(id="nas_1", name="NAS 1", uri="smb://192.168.1.10/Music")
+        nas2 = NASSource(id="nas_2", name="NAS 2", uri="smb://192.168.1.20/Music")
+        self.db.upsert_nas_source(nas1)
+        self.db.upsert_nas_source(nas2)
+
+        sources = self.db.get_nas_sources()
+        self.assertEqual(len(sources), 2)
+
+        # Update nas1
+        nas1.name = "My Updated NAS"
+        self.db.upsert_nas_source(nas1)
+        sources = self.db.get_nas_sources()
+        names = [s.name for s in sources]
+        self.assertIn("My Updated NAS", names)
+
+        # Delete nas2
+        self.db.delete_nas_source("nas_2")
+        sources = self.db.get_nas_sources()
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].id, "nas_1")
+
+    def test_device_inspector_and_artwork_optimizer(self):
+        from soundbee.devices.inspector import DeviceInspector
+        from PIL import Image
+
+        device_dir = os.path.join(self.temp_dir, "test_player")
+        album_dir = os.path.join(device_dir, "Music", "Daft Punk", "Discovery")
+        os.makedirs(album_dir, exist_ok=True)
+
+        # Create dummy track
+        dummy_mp3 = os.path.join(album_dir, "01 - One More Time.mp3")
+        with open(dummy_mp3, "wb") as f:
+            f.write(b"AUDIO")
+
+        # Create oversized cover image (1200x1200)
+        cover_path = os.path.join(album_dir, "cover.jpg")
+        img = Image.new("RGB", (1200, 1200), color="blue")
+        img.save(cover_path, "JPEG", quality=95)
+
+        prof = DeviceProfile(
+            device_id="test_player",
+            name="Test Player",
+            root_path=device_dir,
+            artwork_max_size=300
+        )
+
+        albums = DeviceInspector.scan_device_albums(prof)
+        self.assertEqual(len(albums), 1)
+        alb = albums[0]
+        self.assertEqual(alb.album, "Discovery")
+        self.assertEqual(alb.cover_width, 1200)
+        self.assertTrue(alb.is_oversized)
+
+        # Optimize
+        ok = DeviceInspector.optimize_album_artwork(alb, max_dim=300)
+        self.assertTrue(ok)
+        self.assertLessEqual(alb.cover_width, 300)
+        self.assertLessEqual(alb.cover_height, 300)
+        self.assertFalse(alb.is_oversized)
+
+        # Verify on disk
+        with Image.open(cover_path) as saved_img:
+            self.assertLessEqual(saved_img.width, 300)
+            self.assertLessEqual(saved_img.height, 300)
+
 
 if __name__ == "__main__":
     unittest.main()

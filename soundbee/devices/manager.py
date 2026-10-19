@@ -78,3 +78,29 @@ class DeviceManager:
         )
         self.save_profile(new_prof)
         return new_prof
+
+    def set_default_device(self, device_id: str):
+        """Sets a profile as default and unsets is_default on all others."""
+        for prof in self.get_all_profiles():
+            if prof.device_id == device_id:
+                prof.is_default = True
+                prof.ignored = False
+            else:
+                prof.is_default = False
+            self.save_profile(prof)
+
+    def set_ignored_device(self, device_id: str, ignored: bool = True):
+        """Sets or unsets ignored flag on a device profile."""
+        prof = self.get_profile(device_id)
+        if prof:
+            prof.ignored = ignored
+            if ignored:
+                prof.is_default = False
+            self.save_profile(prof)
+
+    def get_default_profile(self) -> Optional[DeviceProfile]:
+        """Returns the current default profile, if any and not ignored."""
+        for prof in self.get_all_profiles():
+            if prof.is_default and not prof.ignored:
+                return prof
+        return None

@@ -45,6 +45,18 @@ class DeviceSettingsWindow(Adw.PreferencesWindow):
         self.entry_subfolder.set_text(self.profile.music_subfolder)
         group_id.add(self.entry_subfolder)
 
+        self.switch_default = Adw.SwitchRow()
+        self.switch_default.set_title("Definir como Dispositivo Padrão")
+        self.switch_default.set_subtitle("Destino preferencial para envio rápido de músicas")
+        self.switch_default.set_active(self.profile.is_default)
+        group_id.add(self.switch_default)
+
+        self.switch_ignored = Adw.SwitchRow()
+        self.switch_ignored.set_title("Ignorar este dispositivo / volume")
+        self.switch_ignored.set_subtitle("Oculta da barra lateral e não envia músicas para este volume")
+        self.switch_ignored.set_active(self.profile.ignored)
+        group_id.add(self.switch_ignored)
+
         page_general.add(group_id)
 
         # Group: Escopo de Sincronização
@@ -212,6 +224,10 @@ class DeviceSettingsWindow(Adw.PreferencesWindow):
         # Save changes to profile
         self.profile.name = self.entry_name.get_text()
         self.profile.music_subfolder = self.entry_subfolder.get_text()
+        self.profile.is_default = self.switch_default.get_active()
+        self.profile.ignored = self.switch_ignored.get_active()
+        if self.profile.ignored:
+            self.profile.is_default = False
         self.profile.sync_all_library = self.switch_sync_all.get_active()
         self.profile.delete_unmatched_files = self.switch_delete.get_active()
 

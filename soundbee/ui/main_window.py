@@ -20,6 +20,7 @@ from ..core.artwork import AlbumArtworkCache
 from ..core.models import Track, DeviceProfile, NASSource
 from ..devices.detector import DeviceDetector, DetectedDevice
 from ..devices.manager import DeviceManager
+from ..devices.inspector import DeviceInspector, DeviceAlbum
 from .device_dialog import DeviceSettingsWindow
 from .nas_dialog import NASConfigDialog
 
@@ -235,10 +236,10 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_box.append(self.btn_nav_tracks)
 
         # Section: NAS Shares
-        lbl_nas = Gtk.Label(label="SERVIDORES NAS", xalign=0)
-        lbl_nas.set_margin_top(16)
-        lbl_nas.add_css_class("heading")
-        sidebar_box.append(lbl_nas)
+        self.lbl_nas = Gtk.Label(label="SERVIDORES NAS", xalign=0)
+        self.lbl_nas.set_margin_top(16)
+        self.lbl_nas.add_css_class("heading")
+        sidebar_box.append(self.lbl_nas)
 
         self.box_nas = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sidebar_box.append(self.box_nas)
@@ -484,17 +485,61 @@ class MainWindow(Adw.ApplicationWindow):
         lib_box.append(self.lbl_stats)
 
         # --- 2. Device Page ---
+        self.device_scroll = Gtk.ScrolledWindow()
+        self.device_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.stack.add_named(self.device_scroll, "device")
+
         self.device_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         self.device_box.set_margin_start(24)
         self.device_box.set_margin_end(24)
         self.device_box.set_margin_top(20)
         self.device_box.set_margin_bottom(20)
-        self.stack.add_named(self.device_box, "device")
+        self.device_scroll.set_child(self.device_box)
 
+        # Header with Title and Default/Ignored Badge
+        header_dev_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.dev_title = Gtk.Label(label="Dispositivo", xalign=0)
         self.dev_title.add_css_class("title-1")
-        self.device_box.append(self.dev_title)
+        self.dev_title.set_hexpand(True)
+        header_dev_box.append(self.dev_title)
 
+        self.lbl_dev_badge = Gtk.Label(label="")
+        self.lbl_dev_badge.add_css_class("badge")
+        header_dev_box.append(self.lbl_dev_badge)
+        self.device_box.append(header_dev_box)
+
+        # Action Buttons Bar
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.device_box.append(btn_box)
+
+        self.btn_set_default = Gtk.Button(label="⭐ Definir como Padrão")
+        self.btn_set_default.connect("clicked", self._on_set_default_selected_device)
+        btn_box.append(self.btn_set_default)
+
+        self.btn_ignore_device = Gtk.Button(label="🚫 Ignorar Volume")
+        self.btn_ignore_device.connect("clicked", self._on_ignore_selected_device)
+        btn_box.append(self.btn_ignore_device)
+
+        btn_configure = Gtk.Button(label="⚙️ Configurar")
+        btn_configure.connect("clicked", self._on_configure_selected_device)
+        btn_box.append(btn_configure)
+
+        self.btn_optimize_art = Gtk.Button(label="🖼️ Otimizar Capas")
+        self.btn_optimize_art.set_tooltip_text("Reduz capas grandes de álbuns presentes no dispositivo para economizar espaço e evitar travamentos no player")
+        self.btn_optimize_art.connect("clicked", self._on_optimize_artwork_clicked)
+        btn_box.append(self.btn_optimize_art)
+
+        self.btn_force_sync = Gtk.Button(label="🔄 Forçar Ressincronização")
+        self.btn_force_sync.set_tooltip_text("Reenvia e sobrescreve todas as faixas e capas no dispositivo")
+        self.btn_force_sync.connect("clicked", lambda b: self._on_start_sync(force_overwrite=True))
+        btn_box.append(self.btn_force_sync)
+
+        self.btn_sync_now = Gtk.Button(label="Sincronizar Agora")
+        self.btn_sync_now.add_css_class("suggested-action")
+        self.btn_sync_now.connect("clicked", lambda b: self._on_start_sync(force_overwrite=False))
+        btn_box.append(self.btn_sync_now)
+
+        # Device Info Group
         self.dev_info_group = Adw.PreferencesGroup()
         self.row_dev_path = Adw.ActionRow()
         self.row_dev_path.set_title("Ponto de Montagem")
@@ -514,19 +559,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.device_box.append(self.dev_info_group)
 
-        # Action Buttons
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        self.device_box.append(btn_box)
-
-        btn_configure = Gtk.Button(label="Configurar Perfil deste Dispositivo")
-        btn_configure.connect("clicked", self._on_configure_selected_device)
-        btn_box.append(btn_configure)
-
-        self.btn_sync_now = Gtk.Button(label="Sincronizar Agora")
-        self.btn_sync_now.add_css_class("suggested-action")
-        self.btn_sync_now.connect("clicked", self._on_start_sync)
-        btn_box.append(self.btn_sync_now)
-
         # Sync Progress Area
         self.sync_progress_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.sync_progress_box.set_visible(False)
@@ -538,6 +570,28 @@ class MainWindow(Adw.ApplicationWindow):
         self.progress_bar = Gtk.ProgressBar()
         self.progress_bar.set_show_text(True)
         self.sync_progress_box.append(self.progress_bar)
+
+        # Device Explorer Group: Music present on Device
+        dev_explorer_group = Adw.PreferencesGroup()
+        dev_explorer_group.set_title("Músicas Armazenadas no Dispositivo")
+        dev_explorer_group.set_description("Álbuns e capas atualmente detectados na memória deste player.")
+
+        explorer_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.lbl_device_tracks_stats = Gtk.Label(label="Carregando faixas...", xalign=0)
+        self.lbl_device_tracks_stats.set_hexpand(True)
+        explorer_hdr.append(self.lbl_device_tracks_stats)
+
+        btn_refresh_dev_tracks = Gtk.Button(icon_name="view-refresh-symbolic")
+        btn_refresh_dev_tracks.set_tooltip_text("Recarregar músicas do player")
+        btn_refresh_dev_tracks.connect("clicked", lambda b: self._reload_device_tracks())
+        explorer_hdr.append(btn_refresh_dev_tracks)
+        dev_explorer_group.add(explorer_hdr)
+
+        self.device_albums_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.device_albums_box.set_margin_top(8)
+        dev_explorer_group.add(self.device_albums_box)
+
+        self.device_box.append(dev_explorer_group)
 
     def _switch_view(self, mode: str):
         self.current_view_mode = mode
@@ -1205,20 +1259,30 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _update_target_device_dropdown(self):
         if not self.available_devices:
-            names = ["Nenhum dispositivo (Clique em Enviar para criar)"]
+            names = ["Nenhum dispositivo conectado"]
             self.combo_target_device.set_model(Gtk.StringList.new(names))
             self.active_target_device = None
             return
 
-        names = [f"💾 {d.name}" for d in self.available_devices]
+        names = [f"{'⭐ ' if d.is_default else ''}💾 {d.name}" for d in self.available_devices]
         self.combo_target_device.set_model(Gtk.StringList.new(names))
 
-        if self.active_target_device and self.active_target_device in self.available_devices:
-            idx = self.available_devices.index(self.active_target_device)
+        # Check default profile
+        default_prof = self.dev_manager.get_default_profile()
+        target = None
+        if default_prof and any(d.device_id == default_prof.device_id for d in self.available_devices):
+            target = next(d for d in self.available_devices if d.device_id == default_prof.device_id)
+        elif self.active_target_device in self.available_devices:
+            target = self.active_target_device
+        elif len(self.available_devices) == 1:
+            target = self.available_devices[0]
+
+        if target:
+            self.active_target_device = target
+            idx = self.available_devices.index(target)
             self.combo_target_device.set_selected(idx)
         else:
-            self.active_target_device = self.available_devices[0]
-            self.combo_target_device.set_selected(0)
+            self.active_target_device = None
 
     def _on_target_device_changed(self, dropdown, *args):
         idx = dropdown.get_selected()
@@ -1249,14 +1313,21 @@ class MainWindow(Adw.ApplicationWindow):
             title=f"{count} faixa{'s' if count > 1 else ''} selecionada{'s' if count > 1 else ''}"
         )
 
-    def _send_tracks_to_device(self, tracks: List[Track], title: str = "Faixas"):
-        target = self.active_target_device or self.selected_device_profile
+    def _send_tracks_to_device(self, tracks: List[Track], title: str = "Faixas", force_overwrite: bool = False):
+        target = self.active_target_device
         if not target:
-            if self.available_devices:
+            default_prof = self.dev_manager.get_default_profile()
+            if default_prof and any(d.device_id == default_prof.device_id for d in self.available_devices):
+                target = next(d for d in self.available_devices if d.device_id == default_prof.device_id)
+            elif len(self.available_devices) == 1:
                 target = self.available_devices[0]
-                self.active_target_device = target
-            else:
+
+        if not target:
+            if not self.available_devices:
                 self._prompt_destination_and_send(tracks, title)
+                return
+            else:
+                self._prompt_choose_target_and_send(tracks, title, force_overwrite)
                 return
 
         if not os.path.isdir(target.root_path):
@@ -1272,7 +1343,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.selection_bar.set_revealed(True)
 
         def bg_send():
-            plan = self.sync_engine.create_sync_plan(target, tracks, allow_delete=False)
+            plan = self.sync_engine.create_sync_plan(target, tracks, allow_delete=False, force_overwrite=force_overwrite)
             total = len(plan.items_to_copy) + len(plan.items_to_transcode)
             if total == 0:
                 GLib.idle_add(lambda: self._on_send_completed(target, title, "Todos os arquivos já estavam atualizados."))
@@ -1285,8 +1356,57 @@ class MainWindow(Adw.ApplicationWindow):
             success = self.sync_engine.execute_plan(plan, on_progress=on_prog)
             msg = f"Enviado {total} arquivo(s) com sucesso!" if success else "Envio cancelado ou com erros."
             GLib.idle_add(lambda: self._on_send_completed(target, title, msg))
+            GLib.idle_add(self._reload_device_tracks)
 
         threading.Thread(target=bg_send, daemon=True).start()
+
+    def _prompt_choose_target_and_send(self, tracks: List[Track], title: str, force_overwrite: bool = False):
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Escolha o Dispositivo de Destino",
+            f"Mais de um volume está conectado. Escolha para onde deseja transferir {title}:"
+        )
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+
+        selected_dev = [self.available_devices[0]]
+        group_radio = None
+
+        for dev in self.available_devices:
+            r = Gtk.CheckButton(label=f"💾 {dev.name} ({dev.root_path})")
+            if group_radio is None:
+                group_radio = r
+                r.set_active(True)
+            else:
+                r.set_group(group_radio)
+
+            def on_toggled(btn, d=dev):
+                if btn.get_active():
+                    selected_dev[0] = d
+            r.connect("toggled", on_toggled)
+            box.append(r)
+
+        chk_default = Gtk.CheckButton(label="Definir como dispositivo padrão ⭐")
+        chk_default.set_margin_top(8)
+        box.append(chk_default)
+
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("send", "Enviar Músicas")
+        dialog.set_response_appearance("send", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(d, resp):
+            if resp == "send" and selected_dev[0]:
+                chosen = selected_dev[0]
+                if chk_default.get_active():
+                    self.dev_manager.set_default_device(chosen.device_id)
+                    self._refresh_devices()
+                self.active_target_device = chosen
+                self._send_tracks_to_device(tracks, title, force_overwrite=force_overwrite)
+
+        dialog.connect("response", on_response)
+        dialog.present()
 
     def _prompt_destination_and_send(self, tracks: List[Track], title: str):
         dlg = Gtk.FileDialog()
@@ -1331,40 +1451,131 @@ class MainWindow(Adw.ApplicationWindow):
         connected = self.detector.list_connected_devices()
         profiles = self.dev_manager.get_all_profiles()
 
-        self.available_devices = []
-
+        connected_profiles = []
         for d in connected:
             prof = self.dev_manager.get_or_create_profile(d.device_id, d.name, d.root_path, d.device_type)
-            self.available_devices.append(prof)
-            btn = Gtk.Button(label=f"💾 {prof.name}")
+            connected_profiles.append(prof)
+
+        for p in profiles:
+            if p.device_type == "virtual" and not any(c.device_id == p.device_id for c in connected):
+                connected_profiles.append(p)
+
+        active = [p for p in connected_profiles if not p.ignored]
+        ignored = [p for p in connected_profiles if p.ignored]
+
+        self.available_devices = active
+
+        for prof in active:
+            star = "⭐ " if prof.is_default else ""
+            btn = Gtk.Button(label=f"{star}💾 {prof.name}")
             btn.set_halign(Gtk.Align.FILL)
             btn.connect("clicked", lambda b, p=prof: self._select_device(p))
             self.box_devices.append(btn)
 
-        for p in profiles:
-            if p.device_type == "virtual" and not any(c.device_id == p.device_id for c in connected):
-                self.available_devices.append(p)
-                btn = Gtk.Button(label=f"📁 {p.name}")
-                btn.set_halign(Gtk.Align.FILL)
-                btn.connect("clicked", lambda b, prof=p: self._select_device(prof))
-                self.box_devices.append(btn)
+        if ignored:
+            expander = Gtk.Expander(label=f"🚫 Ocultos ({len(ignored)})")
+            expander.set_margin_top(8)
+            exp_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            expander.set_child(exp_box)
+            for prof in ignored:
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                lbl = Gtk.Label(label=prof.name, xalign=0, hexpand=True)
+                lbl.add_css_class("dim-label")
+                row.append(lbl)
+                btn_restore = Gtk.Button(label="Restaurar")
+                btn_restore.add_css_class("flat")
+                btn_restore.connect("clicked", lambda b, p=prof: self._on_restore_device(p))
+                row.append(btn_restore)
+                exp_box.append(row)
+            self.box_devices.append(expander)
 
         self._update_target_device_dropdown()
+
+    def _on_restore_device(self, prof: DeviceProfile):
+        self.dev_manager.set_ignored_device(prof.device_id, False)
+        self.toast_overlay.add_toast(Adw.Toast.new(f"Volume '{prof.name}' restaurado."))
+        self._refresh_devices()
 
     def _refresh_nas_sources(self):
         while child := self.box_nas.get_first_child():
             self.box_nas.remove(child)
 
         sources = self.db.get_nas_sources()
+        if not sources:
+            self.lbl_nas.set_visible(False)
+            self.box_nas.set_visible(False)
+            return
+
+        self.lbl_nas.set_visible(True)
+        self.box_nas.set_visible(True)
+
         for s in sources:
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             btn = Gtk.Button(label=f"🌐 {s.name}")
+            btn.set_hexpand(True)
             btn.set_halign(Gtk.Align.FILL)
+            btn.set_tooltip_text(s.uri)
             btn.connect("clicked", lambda b, src=s: self._on_nas_clicked(src))
-            self.box_nas.append(btn)
+            row_box.append(btn)
+
+            btn_edit = Gtk.Button(icon_name="document-edit-symbolic")
+            btn_edit.add_css_class("flat")
+            btn_edit.set_tooltip_text(f"Editar servidor '{s.name}'")
+            btn_edit.connect("clicked", lambda b, src=s: self._on_edit_nas_clicked(src))
+            row_box.append(btn_edit)
+
+            btn_del = Gtk.Button(icon_name="user-trash-symbolic")
+            btn_del.add_css_class("flat")
+            btn_del.add_css_class("destructive-action")
+            btn_del.set_tooltip_text(f"Remover servidor '{s.name}'")
+            btn_del.connect("clicked", lambda b, src=s: self._on_delete_nas_clicked(src))
+            row_box.append(btn_del)
+
+            self.box_nas.append(row_box)
+
+    def _on_edit_nas_clicked(self, src: NASSource):
+        def on_saved(updated_src: NASSource):
+            self.db.upsert_nas_source(updated_src)
+            self._refresh_nas_sources()
+            self.toast_overlay.add_toast(Adw.Toast.new(f"Servidor '{updated_src.name}' atualizado."))
+
+        dlg = NASConfigDialog(on_saved_callback=on_saved, existing_source=src, transient_for=self)
+        dlg.present()
+
+    def _on_delete_nas_clicked(self, src: NASSource):
+        dialog = Adw.MessageDialog.new(
+            self,
+            f"Remover Servidor NAS '{src.name}'?",
+            f"O compartilhamento {src.uri} será desconectado e as faixas associadas serão removidas da biblioteca."
+        )
+        dialog.add_response("cancel", "Cancelar")
+        dialog.add_response("delete", "Remover Servidor")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def on_resp(d, resp):
+            if resp == "delete":
+                self.db.delete_nas_source(src.id)
+                self._refresh_nas_sources()
+                self._refresh_library()
+                self.toast_overlay.add_toast(Adw.Toast.new(f"Servidor '{src.name}' removido com sucesso."))
+
+        dialog.connect("response", on_resp)
+        dialog.present()
 
     def _select_device(self, profile: DeviceProfile):
         self.selected_device_profile = profile
         self.dev_title.set_text(profile.name)
+        if profile.is_default:
+            self.lbl_dev_badge.set_text("⭐ Padrão")
+            self.lbl_dev_badge.set_visible(True)
+            self.btn_set_default.set_label("⭐ Dispositivo Padrão")
+            self.btn_set_default.set_sensitive(False)
+        else:
+            self.lbl_dev_badge.set_text("")
+            self.lbl_dev_badge.set_visible(False)
+            self.btn_set_default.set_label("⭐ Definir como Padrão")
+            self.btn_set_default.set_sensitive(True)
+
         self.row_dev_path.set_subtitle(profile.root_path or "Desconectado")
         trans_txt = f"{profile.target_codec.upper()} {profile.target_bitrate} kbps" if profile.transcode_enabled else "Cópia direta (Sem conversão)"
         if profile.transcode_enabled and profile.convert_lossless_only:
@@ -1381,6 +1592,145 @@ class MainWindow(Adw.ApplicationWindow):
         self.sync_progress_box.set_visible(False)
         self.stack.set_visible_child_name("device")
 
+        self._reload_device_tracks()
+
+    def _on_set_default_selected_device(self, *args):
+        if not self.selected_device_profile:
+            return
+        prof = self.selected_device_profile
+        self.dev_manager.set_default_device(prof.device_id)
+        self.toast_overlay.add_toast(Adw.Toast.new(f"⭐ '{prof.name}' definido como dispositivo padrão!"))
+        self._refresh_devices()
+        self._select_device(prof)
+
+    def _on_ignore_selected_device(self, *args):
+        if not self.selected_device_profile:
+            return
+        prof = self.selected_device_profile
+        self.dev_manager.set_ignored_device(prof.device_id, True)
+        self.toast_overlay.add_toast(Adw.Toast.new(f"Volume '{prof.name}' ocultado."))
+        self._refresh_devices()
+        self._switch_view("albums")
+
+    def _reload_device_tracks(self):
+        if not self.selected_device_profile:
+            return
+        prof = self.selected_device_profile
+        self.lbl_device_tracks_stats.set_text("🔍 Escaneando músicas no player...")
+        while child := self.device_albums_box.get_first_child():
+            self.device_albums_box.remove(child)
+
+        def worker():
+            albums = DeviceInspector.scan_device_albums(prof)
+            GLib.idle_add(lambda: self._render_device_albums(albums, prof))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_device_albums(self, albums: List[DeviceAlbum], prof: DeviceProfile):
+        while child := self.device_albums_box.get_first_child():
+            self.device_albums_box.remove(child)
+
+        if not albums:
+            lbl_empty = Gtk.Label(label="Nenhum arquivo de áudio encontrado no dispositivo.", xalign=0)
+            lbl_empty.add_css_class("dim-label")
+            self.device_albums_box.append(lbl_empty)
+            self.lbl_device_tracks_stats.set_text("0 álbuns encontrados.")
+            return
+
+        total_tracks = sum(a.track_count for a in albums)
+        oversized = [a for a in albums if a.is_oversized]
+        stats_text = f"🎵 {len(albums)} álbum{'ns' if len(albums) > 1 else ''} ({total_tracks} faixas)"
+        if oversized:
+            stats_text += f" • ⚠️ {len(oversized)} capa{'s' if len(oversized) > 1 else ''} grande{'s' if len(oversized) > 1 else ''}"
+        self.lbl_device_tracks_stats.set_text(stats_text)
+
+        lib_albums = {a["album"].lower(): a for a in self.db.get_albums()}
+
+        for alb in albums:
+            row = Adw.ActionRow()
+            row.set_title(alb.album)
+            row.set_subtitle(f"{alb.artist} • {alb.track_count} faixa(s)")
+
+            if alb.is_oversized:
+                art_lbl = Gtk.Label(label=f"⚠️ {alb.display_cover_info}")
+                art_lbl.add_css_class("warning")
+                row.add_suffix(art_lbl)
+
+                btn_opt = Gtk.Button(label="🖼️ Reduzir Capa")
+                btn_opt.add_css_class("flat")
+                btn_opt.connect("clicked", lambda b, a=alb: self._on_optimize_single_album(a, prof))
+                row.add_suffix(btn_opt)
+            elif alb.cover_width > 0 or alb.has_embedded_cover:
+                art_lbl = Gtk.Label(label=f"✅ {alb.display_cover_info}")
+                art_lbl.add_css_class("dim-label")
+                row.add_suffix(art_lbl)
+            else:
+                art_lbl = Gtk.Label(label="⚪ Sem capa")
+                art_lbl.add_css_class("dim-label")
+                row.add_suffix(art_lbl)
+
+            matching_lib = lib_albums.get(alb.album.lower())
+            if matching_lib:
+                btn_resync = Gtk.Button(icon_name="emblem-synchronizing-symbolic")
+                btn_resync.set_tooltip_text("Reenviar este álbum da biblioteca (sobrescrever arquivos e capa)")
+                btn_resync.add_css_class("flat")
+                btn_resync.connect("clicked", lambda b, tr=matching_lib["tracks"], title=alb.album: self._send_tracks_to_device(tr, title=title, force_overwrite=True))
+                row.add_suffix(btn_resync)
+
+            self.device_albums_box.append(row)
+
+    def _on_optimize_single_album(self, alb: DeviceAlbum, prof: DeviceProfile):
+        if not DeviceInspector.is_writable(prof):
+            self.toast_overlay.add_toast(Adw.Toast.new("Dispositivo montado em modo somente leitura (read-only)."))
+            return
+        self.lbl_sync_status.set_text(f"Otimizando capa de {alb.album}...")
+        self.sync_progress_box.set_visible(True)
+
+        def worker():
+            max_dim = prof.artwork_max_size or 300
+            ok = DeviceInspector.optimize_album_artwork(alb, max_dim=max_dim)
+            GLib.idle_add(lambda: self._on_single_album_optimized(alb, ok))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_single_album_optimized(self, alb: DeviceAlbum, ok: bool):
+        self.sync_progress_box.set_visible(False)
+        if ok:
+            self.toast_overlay.add_toast(Adw.Toast.new(f"✅ Capa de '{alb.album}' otimizada!"))
+        else:
+            self.toast_overlay.add_toast(Adw.Toast.new(f"Aviso: Não foi possível otimizar capa de '{alb.album}'."))
+        self._reload_device_tracks()
+
+    def _on_optimize_artwork_clicked(self, *args):
+        if not self.selected_device_profile:
+            return
+        prof = self.selected_device_profile
+        if not DeviceInspector.is_writable(prof):
+            self.toast_overlay.add_toast(Adw.Toast.new("Dispositivo montado em modo somente leitura (read-only)."))
+            return
+
+        self.sync_progress_box.set_visible(True)
+        self.progress_bar.set_fraction(0.0)
+        self.lbl_sync_status.set_text("Escaneando e otimizando capas grandes no dispositivo...")
+        self.btn_optimize_art.set_sensitive(False)
+
+        def worker():
+            def on_prog(curr, tot, name):
+                frac = curr / max(tot, 1)
+                GLib.idle_add(lambda: self._update_sync_ui(frac, f"Otimizando [{curr}/{tot}]: {name}"))
+
+            res = DeviceInspector.optimize_all_device_artwork(prof, on_progress=on_prog)
+            GLib.idle_add(lambda: self._on_all_artwork_optimized(res))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_all_artwork_optimized(self, res: Dict[str, Any]):
+        self.sync_progress_box.set_visible(False)
+        self.btn_optimize_art.set_sensitive(True)
+        opt = res.get("optimized_count", 0)
+        self.toast_overlay.add_toast(Adw.Toast.new(f"✅ Otimização concluída: {opt} capa(s) reduzida(s)!"))
+        self._reload_device_tracks()
+
     def _on_configure_selected_device(self, *args):
         if not self.selected_device_profile:
             return
@@ -1392,7 +1742,7 @@ class MainWindow(Adw.ApplicationWindow):
         dlg = DeviceSettingsWindow(self.selected_device_profile, on_save_callback=on_saved, transient_for=self)
         dlg.present()
 
-    def _on_start_sync(self, *args):
+    def _on_start_sync(self, *args, force_overwrite: bool = False):
         if not self.selected_device_profile:
             return
 
@@ -1415,11 +1765,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.sync_progress_box.set_visible(True)
         self.btn_sync_now.set_sensitive(False)
         self.progress_bar.set_fraction(0.0)
-        self.lbl_sync_status.set_text("Calculando diferenças e arquivos...")
+        status_prefix = "Forçando ressincronização" if force_overwrite else "Calculando diferenças"
+        self.lbl_sync_status.set_text(f"{status_prefix} e arquivos...")
 
         def run_thread():
-            plan = self.sync_engine.create_sync_plan(prof, tracks)
+            plan = self.sync_engine.create_sync_plan(
+                prof, tracks, allow_delete=prof.delete_unmatched_files, force_overwrite=force_overwrite
+            )
             total_ops = len(plan.items_to_copy) + len(plan.items_to_transcode) + len(plan.items_to_delete)
+            if total_ops == 0:
+                GLib.idle_add(lambda: self.lbl_sync_status.set_text("Todos os arquivos já estão sincronizados."))
+                GLib.idle_add(lambda: self.btn_sync_now.set_sensitive(True))
+                return
 
             def on_prog(curr, tot, text):
                 fraction = curr / max(tot, 1)
@@ -1427,6 +1784,7 @@ class MainWindow(Adw.ApplicationWindow):
 
             self.sync_engine.execute_plan(plan, on_progress=on_prog)
             GLib.idle_add(self._sync_finished)
+            GLib.idle_add(self._reload_device_tracks)
 
         threading.Thread(target=run_thread, daemon=True).start()
 

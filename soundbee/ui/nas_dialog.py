@@ -18,9 +18,11 @@ class NASConfigDialog(Adw.PreferencesWindow):
     def __init__(self, on_saved_callback=None, existing_source: NASSource = None, **kwargs):
         super().__init__(**kwargs)
         self.on_saved_callback = on_saved_callback
+        self.is_edit = existing_source is not None
         self.source = existing_source or NASSource(id="nas_" + uuid.uuid4().hex[:8])
 
-        self.set_title("Conectar Servidor NAS / Compartilhamento")
+        title = f"Configurar Servidor: {self.source.name}" if self.is_edit else "Conectar Servidor NAS / Compartilhamento"
+        self.set_title(title)
         self.set_default_size(620, 520)
 
         page = Adw.PreferencesPage()
@@ -86,7 +88,8 @@ class NASConfigDialog(Adw.PreferencesWindow):
 
         # Group 4: Ação Salvar
         group_action = Adw.PreferencesGroup()
-        self.btn_save = Gtk.Button(label="Salvar e Indexar Músicas")
+        save_lbl = "Salvar Configurações" if self.is_edit else "Salvar e Indexar Músicas"
+        self.btn_save = Gtk.Button(label=save_lbl)
         self.btn_save.add_css_class("suggested-action")
         self.btn_save.set_halign(Gtk.Align.END)
         self.btn_save.connect("clicked", self._on_save_clicked)
