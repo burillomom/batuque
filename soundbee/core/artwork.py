@@ -113,6 +113,7 @@ class AlbumArtworkCache:
     _executor = None
     _lock = None
     _in_flight = None
+    _texture_cache = {}
 
     @classmethod
     def _ensure_init(cls):
@@ -138,6 +139,24 @@ class AlbumArtworkCache:
         key = cls.get_cache_key(artist, album)
         p = os.path.join(cls.CACHE_DIR, f"{key}.jpg")
         return p if os.path.isfile(p) and os.path.getsize(p) > 0 else None
+
+    @classmethod
+    def get_cached_paintable(cls, artist: str, album: str) -> Optional[Any]:
+        """Returns in-memory decoded Gdk.Texture if available, or decodes cached file."""
+        cls._ensure_init()
+        key = cls.get_cache_key(artist, album)
+        if key in cls._texture_cache:
+            return cls._texture_cache[key]
+        p = cls.get_cached_cover_path(artist, album)
+        if p:
+            try:
+                from gi.repository import Gdk
+                tex = Gdk.Texture.new_from_filename(p)
+                cls._texture_cache[key] = tex
+                return tex
+            except Exception:
+                pass
+        return None
 
     @classmethod
     def get_or_extract_cover_path(
@@ -189,9 +208,9 @@ class AlbumArtworkCache:
         cls._ensure_init()
         from gi.repository import GLib
 
-        cached = cls.get_cached_cover_path(artist, album)
-        if cached:
-            GLib.idle_add(lambda: on_loaded_callback(cached))
+        tex = cls.get_cached_paintable(artist, album)
+        if tex:
+            GLib.idle_add(lambda: on_loaded_callback(tex))
             return
 
         key = cls.get_cache_key(artist, album)
@@ -204,7 +223,15 @@ class AlbumArtworkCache:
             try:
                 path = cls.get_or_extract_cover_path(artist, album, sample_path_or_paths, max_dim=max_dim)
                 if path:
-                    GLib.idle_add(lambda: on_loaded_callback(path))
+                    tex_obj = None
+                    try:
+                        from gi.repository import Gdk
+                        tex_obj = Gdk.Texture.new_from_filename(path)
+                        cls._texture_cache[key] = tex_obj
+                    except Exception:
+                        pass
+                    paintable = tex_obj or path
+                    GLib.idle_add(lambda: on_loaded_callback(paintable))
             finally:
                 with cls._lock:
                     cls._in_flight.discard(key)
