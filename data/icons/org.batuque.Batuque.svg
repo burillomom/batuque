@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background squircle gradient (Adwaita dark luxury palette) -->
+    <linearGradient id="bgGrad" x1="16" y1="12" x2="112" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#242234"/>
+      <stop offset="50%" stop-color="#181724"/>
+      <stop offset="100%" stop-color="#100F18"/>
+    </linearGradient>
+
+    <!-- Squircle border highlight -->
+    <linearGradient id="borderGrad" x1="16" y1="12" x2="112" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6E6A86" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#2A283E" stop-opacity="0.3"/>
+    </linearGradient>
+
+    <!-- Drum shell gradient: Vibrant Brazilian Samba Energy (Tangerine -> Magenta -> Purple) -->
+    <linearGradient id="shellGrad" x1="26" y1="50" x2="102" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF5722"/>
+      <stop offset="28%" stop-color="#E91E63"/>
+      <stop offset="65%" stop-color="#C2185B"/>
+      <stop offset="100%" stop-color="#7B1FA2"/>
+    </linearGradient>
+
+    <!-- Cylindrical lighting / highlight -->
+    <linearGradient id="shellLighting" x1="26" y1="70" x2="102" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.15"/>
+      <stop offset="25%" stop-color="#FFFFFF" stop-opacity="0.3"/>
+      <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="85%" stop-color="#000000" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.45"/>
+    </linearGradient>
+
+    <!-- Golden metallic rim gradient -->
+    <linearGradient id="goldRim" x1="26" y1="36" x2="102" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFF59D"/>
+      <stop offset="25%" stop-color="#FFD54F"/>
+      <stop offset="55%" stop-color="#FFA000"/>
+      <stop offset="85%" stop-color="#FF8F00"/>
+      <stop offset="100%" stop-color="#FFC107"/>
+    </linearGradient>
+
+    <!-- Lower hoop metallic gradient -->
+    <linearGradient id="goldHoopBottom" x1="26" y1="84" x2="102" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFE082"/>
+      <stop offset="35%" stop-color="#FFA000"/>
+      <stop offset="75%" stop-color="#FF8F00"/>
+      <stop offset="100%" stop-color="#E65100"/>
+    </linearGradient>
+
+    <!-- Drumhead parchment gradient -->
+    <radialGradient id="headGrad" cx="64" cy="46" r="36" fx="64" fy="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="55%" stop-color="#FAF5EB"/>
+      <stop offset="85%" stop-color="#EADBCE"/>
+      <stop offset="100%" stop-color="#D7C3B0"/>
+    </radialGradient>
+
+    <!-- Hardware gold gradient (tuning lugs & rods) -->
+    <linearGradient id="hardwareGold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFDE7"/>
+      <stop offset="30%" stop-color="#FFD54F"/>
+      <stop offset="70%" stop-color="#FFB300"/>
+      <stop offset="100%" stop-color="#FF8F00"/>
+    </linearGradient>
+
+    <!-- Polished wood drumstick gradient -->
+    <linearGradient id="stickGrad" x1="0" y1="0" x2="1" y2="0.8">
+      <stop offset="0%" stop-color="#FFF8E7"/>
+      <stop offset="45%" stop-color="#EED9B7"/>
+      <stop offset="80%" stop-color="#D7B588"/>
+      <stop offset="100%" stop-color="#B28956"/>
+    </linearGradient>
+
+    <!-- Soundwave & rhythm pulse gradients -->
+    <linearGradient id="pulseCyan" x1="28" y1="16" x2="100" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="50%" stop-color="#7C4DFF"/>
+      <stop offset="100%" stop-color="#FF4081"/>
+    </linearGradient>
+    <linearGradient id="pulseAmber" x1="38" y1="26" x2="90" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFD700"/>
+      <stop offset="50%" stop-color="#FF6D00"/>
+      <stop offset="100%" stop-color="#FF1744"/>
+    </linearGradient>
+
+    <!-- Drum bottom drop shadow -->
+    <radialGradient id="drumShadow" cx="64" cy="99" r="42" fx="64" fy="97" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.7"/>
+      <stop offset="60%" stop-color="#000000" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Sync pulse ring glow -->
+    <radialGradient id="glowCenter" cx="64" cy="47" r="14" fx="64" fy="47" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFE082" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#FF9100" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ================= CANVAS BASE (ADWAITA SQUIRCLE) ================= -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bgGrad)"/>
+  <rect x="8.75" y="8.75" width="110.5" height="110.5" rx="27.25" stroke="url(#borderGrad)" stroke-width="1.5" fill="none"/>
+
+  <!-- ================= RHYTHM SOUNDWAVES / SYNC PULSES ================= -->
+  <!-- Outer Pulse Arc -->
+  <path d="M 28 26 C 44 13 84 13 100 26" stroke="url(#pulseCyan)" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.75"/>
+  <!-- Inner Pulse Arc -->
+  <path d="M 38 33 C 48 24 80 24 90 33" stroke="url(#pulseAmber)" stroke-width="2.8" stroke-linecap="round" stroke-opacity="0.9"/>
+
+  <!-- Floating Musical Sync Particles -->
+  <circle cx="64" cy="19" r="2.2" fill="#FFD700"/>
+  <circle cx="46" cy="17" r="1.6" fill="#00E5FF"/>
+  <circle cx="82" cy="17" r="1.6" fill="#FF4081"/>
+
+  <!-- ================= DRUM BASE DROP SHADOW ================= -->
+  <ellipse cx="64" cy="100" rx="38" ry="9" fill="url(#drumShadow)"/>
+
+  <!-- ================= DRUM BODY (CYLINDER) ================= -->
+  <!-- Smooth cylindrical shell with matching elliptical bottom -->
+  <path d="M 26 48 L 26 84 C 26 94.5 43 100 64 100 C 85 100 102 94.5 102 84 L 102 48 Z" 
+        fill="url(#shellGrad)"/>
+  <path d="M 26 48 L 26 84 C 26 94.5 43 100 64 100 C 85 100 102 94.5 102 84 L 102 48 Z" 
+        fill="url(#shellLighting)"/>
+
+  <!-- Bottom Rim (Aro Inferior) -->
+  <path d="M 26 84 C 26 94.5 43 100 64 100 C 85 100 102 94.5 102 84" 
+        stroke="url(#goldHoopBottom)" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+  <path d="M 28 85 C 28 94 44 98.8 64 98.8 C 84 98.8 100 94 100 85" 
+        stroke="#FFF9C4" stroke-width="1.2" stroke-opacity="0.75" stroke-linecap="round" fill="none"/>
+
+  <!-- ================= TUNING HARDWARE (TENSORES E PARAFUSOS) ================= -->
+  <!-- Rod 1 (Left Far) -->
+  <line x1="36" y1="52" x2="36" y2="88" stroke="#7A3000" stroke-width="3" stroke-linecap="round"/>
+  <line x1="36" y1="52" x2="36" y2="88" stroke="url(#hardwareGold)" stroke-width="2" stroke-linecap="round"/>
+  <rect x="33.5" y="50" width="5" height="5" rx="1.5" fill="#FFF59D" stroke="#B26A00" stroke-width="0.7"/>
+  <rect x="33.5" y="85" width="5" height="5" rx="1.5" fill="#FFB300" stroke="#7A3000" stroke-width="0.7"/>
+
+  <!-- Rod 2 (Center Left) -->
+  <line x1="50" y1="56" x2="50" y2="95" stroke="#7A3000" stroke-width="3.2" stroke-linecap="round"/>
+  <line x1="50" y1="56" x2="50" y2="95" stroke="url(#hardwareGold)" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="47.5" y="54" width="5" height="5.5" rx="1.5" fill="#FFF59D" stroke="#B26A00" stroke-width="0.7"/>
+  <rect x="47.5" y="92.5" width="5" height="5.5" rx="1.5" fill="#FFB300" stroke="#7A3000" stroke-width="0.7"/>
+
+  <!-- Rod 3 (Center Right) -->
+  <line x1="78" y1="56" x2="78" y2="95" stroke="#7A3000" stroke-width="3.2" stroke-linecap="round"/>
+  <line x1="78" y1="56" x2="78" y2="95" stroke="url(#hardwareGold)" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="75.5" y="54" width="5" height="5.5" rx="1.5" fill="#FFF59D" stroke="#B26A00" stroke-width="0.7"/>
+  <rect x="75.5" y="92.5" width="5" height="5.5" rx="1.5" fill="#FFB300" stroke="#7A3000" stroke-width="0.7"/>
+
+  <!-- Rod 4 (Right Far) -->
+  <line x1="92" y1="52" x2="92" y2="88" stroke="#7A3000" stroke-width="3" stroke-linecap="round"/>
+  <line x1="92" y1="52" x2="92" y2="88" stroke="url(#hardwareGold)" stroke-width="2" stroke-linecap="round"/>
+  <rect x="89.5" y="50" width="5" height="5" rx="1.5" fill="#FFF59D" stroke="#B26A00" stroke-width="0.7"/>
+  <rect x="89.5" y="85" width="5" height="5" rx="1.5" fill="#FFB300" stroke="#7A3000" stroke-width="0.7"/>
+
+  <!-- Sync Graphic Wave on Drum Shell Front -->
+  <path d="M 44 76 C 52 69 56 83 64 76 C 72 69 76 83 84 76" 
+        stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+
+  <!-- ================= DRUM HEAD & TOP RIM ================= -->
+  <!-- Top Rim Shadow -->
+  <ellipse cx="64" cy="49" rx="38" ry="14" fill="#C67100"/>
+  <!-- Top Metallic Rim (Aro Superior) -->
+  <ellipse cx="64" cy="47.5" rx="38" ry="14" fill="url(#goldRim)"/>
+
+  <!-- Inner Drumhead (Pele Superior) -->
+  <ellipse cx="64" cy="47.5" rx="33.5" ry="11.5" fill="url(#headGrad)"/>
+
+  <!-- Concentric Acoustic Vibration Rings on Skin -->
+  <ellipse cx="64" cy="47.5" rx="23" ry="7.5" stroke="#CBB797" stroke-width="1" stroke-dasharray="2.5 3" stroke-opacity="0.65" fill="none"/>
+  <ellipse cx="64" cy="47.5" rx="13" ry="4.2" stroke="#BCAAA4" stroke-width="0.8" stroke-opacity="0.55" fill="none"/>
+
+  <!-- Top Rim Metallic Specular Highlight -->
+  <ellipse cx="64" cy="47" rx="36.5" ry="13" stroke="#FFFDE7" stroke-width="1.2" stroke-opacity="0.85" fill="none"/>
+
+  <!-- Strike Glow Center -->
+  <circle cx="64" cy="47" r="10" fill="url(#glowCenter)"/>
+  <circle cx="64" cy="47" r="2.8" fill="#FFD54F"/>
+
+  <!-- ================= DRUMSTICKS (BAQUETAS DE BATUQUE) ================= -->
+  <!-- Left Drumstick -->
+  <g filter="drop-shadow(0px 2.5px 3px rgba(0,0,0,0.5))">
+    <line x1="16" y1="22" x2="60" y2="45.5" stroke="url(#stickGrad)" stroke-width="3.5" stroke-linecap="round"/>
+    <ellipse cx="61" cy="46" rx="2.8" ry="2" transform="rotate(28 61 46)" fill="#FFF8E7" stroke="#8D6E63" stroke-width="0.5"/>
+  </g>
+
+  <!-- Right Drumstick -->
+  <g filter="drop-shadow(0px 2.5px 3px rgba(0,0,0,0.5))">
+    <line x1="112" y1="22" x2="68" y2="45.5" stroke="url(#stickGrad)" stroke-width="3.5" stroke-linecap="round"/>
+    <ellipse cx="67" cy="46" rx="2.8" ry="2" transform="rotate(-28 67 46)" fill="#FFF8E7" stroke="#8D6E63" stroke-width="0.5"/>
+  </g>
+
+  <!-- Dynamic Rhythm Impact Sparks -->
+  <path d="M 64 42 L 64 38 M 59 44 L 56 42 M 69 44 L 72 42" stroke="#FFE082" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

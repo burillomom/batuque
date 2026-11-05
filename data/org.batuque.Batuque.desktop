@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Batuque
+GenericName=Gerenciador de Música e Sincronizador de DAPs
+Comment=Gerencie sua biblioteca musical no NAS e sincronize seus DAPs e players portáteis no ritmo certo
+Exec=batuque %U
+Terminal=false
+Type=Application
+Icon=org.batuque.Batuque
+Categories=AudioVideo;Audio;Music;Player;GTK;
+Keywords=Batuque;MusicBee;NAS;SMB;MP3;FLAC;DAP;Sync;Música;
+StartupNotify=true
+StartupWMClass=org.batuque.Batuque

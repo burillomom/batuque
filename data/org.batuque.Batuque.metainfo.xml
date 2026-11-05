@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.batuque.Batuque</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Batuque</name>
+  <summary>Gerenciador de música e sincronizador de DAPs para Linux inspirado no MusicBee</summary>
+  <description>
+    <p>
+      Batuque é um gerenciador de coleções musicais open-source para Linux focado em integração nativa com servidores NAS (SMB/NFS/WebDAV) e sincronização inteligente para dispositivos portáteis (DAPs, USB, cartões SD, MTP e pastas virtuais).
+    </p>
+    <ul>
+      <li>Visualização organizada por Álbuns, Artistas, Anos, Gêneros e Faixas</li>
+      <li>Conexão direta via GIO/GVFS com servidores NAS na rede</li>
+      <li>Indexação incremental ultra-rápida (atualização apenas de faixas novas/modificadas)</li>
+      <li>Perfis independentes de sincronização e conversão (FFmpeg) para cada dispositivo DAP</li>
+      <li>Templates de organização de pastas compatíveis com MusicBee</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">org.batuque.Batuque.desktop</launchable>
+  <developer id="org.batuque">
+    <name>Murillo Bom</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-10-24"/>
+  </releases>
+</component>

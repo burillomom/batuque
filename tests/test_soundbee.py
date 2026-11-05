@@ -330,6 +330,235 @@ class TestSoundBee(unittest.TestCase):
             self.assertLessEqual(saved_img.width, 300)
             self.assertLessEqual(saved_img.height, 300)
 
+    def test_database_batch_upsert_and_cache(self):
+        tracks = [
+            Track(file_path=f"/music/track_{i}.mp3", title=f"Track {i}", artist="Artist", album="Album", size_bytes=1000 + i, mtime=1700000.0 + i, source_id="src1")
+            for i in range(10)
+        ]
+        count = self.db.upsert_tracks_batch(tracks)
+        self.assertEqual(count, 10)
+
+        cache = self.db.get_cached_paths_map("src1")
+        self.assertEqual(len(cache), 10)
+        self.assertIn("/music/track_0.mp3", cache)
+        self.assertEqual(cache["/music/track_0.mp3"][1], 1000)
+
+        # Test source ID update
+        self.db.update_source_id_for_paths(["/music/track_0.mp3"], "src2")
+        cache2 = self.db.get_cached_paths_map("src2")
+        self.assertEqual(len(cache2), 1)
+    def test_preserve_folder_structure_and_album_artist(self):
+        # Test {Album Artist} formatting
+        t = Track(
+            artist="Daft Punk",
+            album_artist="Various Artists",
+            album="TRON: Legacy",
+            title="Derezzed",
+            track_number=13,
+            file_format="flac"
+        )
+        res = FileOrganizer.format_relative_path(t, "{Album Artist}/{Album}/{Track:02d} - {Title}.{ext}", "mp3")
+        self.assertEqual(res, "Various Artists/TRON_ Legacy/13 - Derezzed.mp3")
+
+        # Test preserve_folder_structure
+        roots = ["smb://192.168.1.100/Music", "/local/music"]
+        p1 = FileOrganizer.get_preserved_relative_path(
+            "smb://192.168.1.100/Music/Rock/Queen/A Night at the Opera/04 - You're My Best Friend.flac",
+            source_roots=roots,
+            target_extension="mp3"
+        )
+        self.assertEqual(p1, "Rock/Queen/A Night at the Opera/04 - You're My Best Friend.mp3")
+
+        # Test sync plan with preserve_folder_structure enabled
+        device_dir = os.path.join(self.temp_dir, "dap_preserve")
+        os.makedirs(device_dir, exist_ok=True)
+        prof = DeviceProfile(
+            device_id="dap_preserve",
+            name="DAP Preserve",
+            root_path=device_dir,
+            music_subfolder="Music",
+            preserve_folder_structure=True,
+            transcode_enabled=False
+        )
+
+        dummy_audio = os.path.join(self.temp_dir, "source_library", "Rock", "Band", "Album", "01.mp3")
+        os.makedirs(os.path.dirname(dummy_audio), exist_ok=True)
+        with open(dummy_audio, "wb") as f:
+            f.write(b"AUDIO")
+
+        t2 = Track(
+            file_path=dummy_audio,
+            title="01",
+            artist="Band",
+            album="Album",
+            size_bytes=5
+        )
+
+        engine = SyncEngine()
+        plan = engine.create_sync_plan(
+            prof, [t2],
+            source_roots=[os.path.join(self.temp_dir, "source_library")]
+        )
+        self.assertEqual(len(plan.items_to_copy), 1)
+        self.assertEqual(plan.items_to_copy[0].target_rel_path, "Music/Rock/Band/Album/01.mp3")
+
+        ok = engine.execute_plan(plan)
+        self.assertTrue(ok)
+        self.assertEqual(plan.successful_items, 1)
+        self.assertEqual(plan.failed_items, 0)
+        self.assertTrue(os.path.isfile(os.path.join(device_dir, "Music", "Rock", "Band", "Album", "01.mp3")))
+
+    def test_artwork_corruption_detection_and_clean(self):
+        from PIL import Image, ImageFile
+        from soundbee.core.artwork import AlbumArtworkCache
+
+        # Truncated images flag must be False
+        self.assertFalse(ImageFile.LOAD_TRUNCATED_IMAGES)
+
+        # 1. Valid image
+        good_img = Image.new("RGB", (100, 100), color=(200, 50, 50))
+        self.assertFalse(AlbumArtworkCache.is_corrupted_artwork(good_img))
+
+        # 2. Corrupted image with PIL gray filler (128, 128, 128) in bottom scanlines
+        bad_img = Image.new("RGB", (100, 100), color=(200, 50, 50))
+        for y in range(70, 100):
+            for x in range(100):
+                bad_img.putpixel((x, y), (128, 128, 128))
+        self.assertTrue(AlbumArtworkCache.is_corrupted_artwork(bad_img))
+
+        # 3. Cache directory cleanup
+        test_cache = os.path.join(self.temp_dir, "test_covers")
+        os.makedirs(test_cache, exist_ok=True)
+        old_cache_dir = AlbumArtworkCache.CACHE_DIR
+        old_legacy = AlbumArtworkCache.LEGACY_CACHE_DIR
+        try:
+            AlbumArtworkCache.CACHE_DIR = test_cache
+            AlbumArtworkCache.LEGACY_CACHE_DIR = os.path.join(self.temp_dir, "nonexistent")
+            AlbumArtworkCache._verified_clean.clear()
+
+            good_path = os.path.join(test_cache, "good.jpg")
+            bad_path = os.path.join(test_cache, "bad.jpg")
+            good_img.save(good_path, format="JPEG")
+            bad_img.save(bad_path, format="JPEG")
+
+            self.assertTrue(os.path.exists(good_path))
+            self.assertTrue(os.path.exists(bad_path))
+
+            removed = AlbumArtworkCache.clean_corrupted_covers()
+            self.assertIn(bad_path, removed)
+            self.assertNotIn(good_path, removed)
+            self.assertFalse(os.path.exists(bad_path))
+            self.assertTrue(os.path.exists(good_path))
+        finally:
+            AlbumArtworkCache.CACHE_DIR = old_cache_dir
+            AlbumArtworkCache.LEGACY_CACHE_DIR = old_legacy
+            AlbumArtworkCache._verified_clean.clear()
+
+    def test_device_artwork_repair_and_sync_healing(self):
+        from PIL import Image
+        from soundbee.devices.inspector import DeviceInspector
+        from soundbee.core.artwork import AlbumArtworkCache
+
+        orig_cache = AlbumArtworkCache.CACHE_DIR
+        orig_legacy = AlbumArtworkCache.LEGACY_CACHE_DIR
+        test_cache = os.path.join(self.temp_dir, "isolated_cache")
+        os.makedirs(test_cache, exist_ok=True)
+
+        try:
+            AlbumArtworkCache.CACHE_DIR = test_cache
+            AlbumArtworkCache.LEGACY_CACHE_DIR = os.path.join(self.temp_dir, "isolated_legacy")
+            AlbumArtworkCache._verified_clean.clear()
+
+            device_dir = os.path.join(self.temp_dir, "test_device_art")
+            album_dir = os.path.join(device_dir, "Music", "TestBandArt", "TestAlbumArt")
+            os.makedirs(album_dir, exist_ok=True)
+
+            prof = DeviceProfile(
+                device_id="dev_test_art",
+                name="Test iPod",
+                root_path=device_dir,
+                artwork_save_file=True,
+                artwork_filename="cover.jpg",
+                artwork_max_size=300
+            )
+
+            # 1. Create a dummy audio file on device
+            track_file = os.path.join(album_dir, "01 - Love Letter.mp3")
+            with open(track_file, "wb") as f:
+                f.write(b"ID3\x03\x00\x00\x00\x00\x00\x00Dummy audio data payload")
+
+            # 2. Create a corrupted cover.jpg on device with gray filler at the bottom
+            corrupted_cover = Image.new("RGB", (300, 300), color=(180, 40, 40))
+            for y in range(200, 300):
+                for x in range(300):
+                    corrupted_cover.putpixel((x, y), (128, 128, 128))
+            corrupt_path = os.path.join(album_dir, "cover.jpg")
+            corrupted_cover.save(corrupt_path, format="JPEG", quality=85)
+
+            # 3. Scan device albums and assert corruption detected
+            albums = DeviceInspector.scan_device_albums(prof)
+            self.assertEqual(len(albums), 1)
+            self.assertTrue(albums[0].has_corrupted_cover)
+            self.assertIn("Corrompida", albums[0].display_cover_info)
+
+            # 4. Populate clean cover in isolated test cache
+            clean_cover = Image.new("RGB", (300, 300), color=(50, 150, 220))
+            cache_key = AlbumArtworkCache.get_cache_key(albums[0].artist, albums[0].album)
+            clean_cache_path = os.path.join(AlbumArtworkCache.CACHE_DIR, f"{cache_key}.jpg")
+            clean_cover.save(clean_cache_path, format="JPEG")
+            AlbumArtworkCache._verified_clean.add(clean_cache_path)
+
+            # 5. Repair artwork on device
+            res = DeviceInspector.repair_all_device_artwork(prof)
+            self.assertEqual(res["corrupted_found"], 1)
+            self.assertEqual(res["repaired_count"], 1)
+
+            # 6. Verify cover.jpg on device is now clean
+            with Image.open(corrupt_path) as im:
+                im.load()
+                self.assertFalse(AlbumArtworkCache.is_corrupted_artwork(im))
+                r, g, b = im.getpixel((150, 150))
+                self.assertTrue(b > 150)
+
+            # 7. Rescan device albums: should be clean
+            albums_after = DeviceInspector.scan_device_albums(prof)
+            self.assertFalse(albums_after[0].has_corrupted_cover)
+
+            # 8. Test SyncEngine auto-healing for skipped tracks
+            # Re-corrupt the cover on device
+            corrupted_cover.save(corrupt_path, format="JPEG", quality=85)
+            AlbumArtworkCache._verified_clean.discard(corrupt_path)
+
+            source_dir = os.path.join(self.temp_dir, "source_art")
+            os.makedirs(source_dir, exist_ok=True)
+            source_track_path = os.path.join(source_dir, "01.mp3")
+            shutil.copy2(track_file, source_track_path)
+
+            t = Track(
+                file_path=source_track_path,
+                artist="TestBandArt",
+                album="TestAlbumArt",
+                title="Love Letter",
+                track_number=1,
+                size_bytes=os.path.getsize(source_track_path),
+                file_format="mp3"
+            )
+
+            engine = SyncEngine()
+            plan = engine.create_sync_plan(prof, [t])
+            self.assertEqual(len(plan.items_to_skip), 1)
+
+            ok = engine.execute_plan(plan)
+            self.assertTrue(ok)
+
+            with Image.open(corrupt_path) as im:
+                im.load()
+                self.assertFalse(AlbumArtworkCache.is_corrupted_artwork(im))
+        finally:
+            AlbumArtworkCache.CACHE_DIR = orig_cache
+            AlbumArtworkCache.LEGACY_CACHE_DIR = orig_legacy
+            AlbumArtworkCache._verified_clean.clear()
+
 
 if __name__ == "__main__":
     unittest.main()

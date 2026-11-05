@@ -1,6 +1,7 @@
 """
-SoundBee - Open Source Music Manager & Device Synchronizer for Linux
-Inspired by MusicBee architecture and workflows.
+Compatibility shim for SoundBee -> Batuque transition.
+All core modules and functionality have migrated to the `batuque` package.
 """
-
-__version__ = "0.1.0"
+import batuque
+from batuque import *
+__version__ = batuque.__version__

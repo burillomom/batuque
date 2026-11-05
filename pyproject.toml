@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "soundbee"
+name = "batuque"
 version = "0.1.0"
-description = "Gerenciador de música e sincronizador de dispositivos open-source para Linux inspirado no MusicBee"
+description = "Batuque - Gerenciador de música e sincronizador de dispositivos open-source para Linux inspirado no MusicBee"
 readme = "README.md"
 authors = [
     { name = "Murillo Bom" }
@@ -23,6 +23,12 @@ dependencies = [
 ]
 
 [project.scripts]
-soundbee = "soundbee.__main__:run_entrypoint"
-soundbee-gui = "soundbee.ui.app:run_app"
-soundbee-cli = "soundbee.cli:main"
+batuque = "batuque.__main__:run_entrypoint"
+batuque-gui = "batuque.ui.app:run_app"
+batuque-cli = "batuque.cli:main"
+soundbee = "batuque.__main__:run_entrypoint"
+soundbee-gui = "batuque.ui.app:run_app"
+soundbee-cli = "batuque.cli:main"
+
+[tool.setuptools]
+packages = ["batuque", "soundbee"]

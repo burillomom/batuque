@@ -1,9 +1,28 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-*.egg-info/
-dist/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
 build/
+dist/
+*.egg-info/
+rpmbuild/
+*.rpm
+
+# Local databases & run data
 *.db
+*.sqlite3
+*.log
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*~
