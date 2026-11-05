@@ -17,12 +17,25 @@
       <li>Templates de organização de pastas compatíveis com MusicBee</li>
     </ul>
   </description>
+  <url type="homepage">https://github.com/burillomom/batuque</url>
+  <url type="bugtracker">https://github.com/burillomom/batuque/issues</url>
+  <url type="vcs-browser">https://github.com/burillomom/batuque</url>
   <launchable type="desktop-id">org.batuque.Batuque.desktop</launchable>
   <developer id="org.batuque">
     <name>Murillo Bom</name>
   </developer>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/burillomom/batuque/main/data/screenshots/main_grid.png</image>
+      <caption>Grade de Álbuns adaptativa com controle de zoom e seleção</caption>
+    </screenshot>
+  </screenshots>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.1.0" date="2026-10-24"/>
+    <release version="0.1.0" date="2026-11-05">
+      <description>
+        <p>Lançamento inicial do Batuque com suporte a NAS, sincronização com DAPs, grade customizável e reparo automático de capas.</p>
+      </description>
+    </release>
   </releases>
 </component>
